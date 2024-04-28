@@ -229,6 +229,21 @@ class LibUsbLibrary:
         lib.libusb_clear_halt.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_ubyte]
         lib.libusb_clear_halt.restype = ctypes.c_int
 
+        lib.libusb_get_configuration.argtypes = [LibUsbDeviceHandlePtr, ctypes.POINTER(ctypes.c_int)]
+        lib.libusb_get_configuration.restype = ctypes.c_int
+
+        lib.libusb_set_configuration.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_int]
+        lib.libusb_set_configuration.restype = ctypes.c_int
+
+        lib.libusb_kernel_driver_active.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_int]
+        lib.libusb_kernel_driver_active.restype = ctypes.c_int
+
+        lib.libusb_detach_kernel_driver.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_int]
+        lib.libusb_detach_kernel_driver.restype = ctypes.c_int
+
+        lib.libusb_attach_kernel_driver.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_int]
+        lib.libusb_attach_kernel_driver.restype = ctypes.c_int
+
         lib.libusb_set_auto_detach_kernel_driver.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_int]
         lib.libusb_set_auto_detach_kernel_driver.restype = ctypes.c_int
 
@@ -410,8 +425,46 @@ class LibUsbLibrary:
         if result != LIBUSB_SUCCESS:
             raise self._libusb_exception(result)
 
+    def get_configuration(self, device_handle: LibUsbDeviceHandlePtr) -> int:
+        """Get device configuration."""
+        c_configuration = ctypes.c_int()
+        result = self._lib.libusb_get_configuration(device_handle, c_configuration)
+        if result != LIBUSB_SUCCESS:
+            raise self._libusb_exception(result)
+        configuration = c_configuration.value
+        return configuration
+
+    def set_configuration(self, device_handle: LibUsbDeviceHandlePtr, configuration: int) -> None:
+        """Set device configuration."""
+        result = self._lib.libusb_set_configuration(device_handle, configuration)
+        if result != LIBUSB_SUCCESS:
+            raise self._libusb_exception(result)
+
+    def kernel_driver_active(self, device_handle: LibUsbDeviceHandlePtr, interface_number: int) -> bool:
+        """Determine if a kernel driver is active on an interface. """
+        result = self._lib.libusb_kernel_driver_active(device_handle, interface_number)
+        if result == LIBUSB_ERROR_NOT_SUPPORTED:
+            # In OS'es where the "kernel driver active: concept does not exist,
+            # report False.
+            return False
+        if result < 0:
+            raise self._libusb_exception(result)
+        return bool(result)
+
+    def detach_kernel_driver(self, device_handle: LibUsbDeviceHandlePtr, interface_number: int) -> None:
+        """CDetach a kernel driver from an interface."""
+        result = self._lib.libusb_detach_kernel_driver(device_handle, interface_number)
+        if result != LIBUSB_SUCCESS:
+            raise self._libusb_exception(result)
+
+    def attach_kernel_driver(self, device_handle: LibUsbDeviceHandlePtr, interface_number: int) -> None:
+        """Re-attach an interface's kernel driver."""
+        result = self._lib.libusb_attach_kernel_driver(device_handle, interface_number)
+        if result != LIBUSB_SUCCESS:
+            raise self._libusb_exception(result)
+
     def set_auto_detach_kernel_driver(self, device_handle: LibUsbDeviceHandlePtr, enable: bool) -> None:
-        """Configure the auto detach kernel driver setting."""
+        """Enable/disable libusb's automatic kernel driver detachment."""
         result = self._lib.libusb_set_auto_detach_kernel_driver(device_handle, enable)
         if result not in (LIBUSB_SUCCESS, LIBUSB_ERROR_NOT_SUPPORTED):
             raise self._libusb_exception(result)
@@ -473,10 +526,6 @@ class LibUsbLibrary:
             except LibUsbError:
                 # Cannot open the device -- reject.
                 continue
-
-            # Automatically manage the attaching/detaching of kernel drivers upon
-            # claiming and releasing the device.
-            self.set_auto_detach_kernel_driver(device_handle, True)
 
             if serial is None:
                 # No check on the serial number was requested. Accept the device.
