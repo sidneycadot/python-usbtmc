@@ -63,7 +63,9 @@ def main():
 
     print("Running tests ...")
 
-    usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x5707)
+    #usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x5707)  # Keysight 33622A
+    usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x1907)  # Keysight 33622A
+
     usbtmc_device.open()
     with contextlib.closing(usbtmc_device):
 
@@ -87,7 +89,7 @@ def main():
                 with open("H:\\vm_shared\\pythontest.bmp", "wb") as fo:
                     fo.write(image)
 
-        make_wave = True
+        make_wave = False
         if make_wave:
             num_samples = 20000
             data = bytes(4 * num_samples)
@@ -97,7 +99,7 @@ def main():
 
         multiple_commands = True
         if multiple_commands:
-            usbtmc_device.write_usbtmc_message("FREQ?;FREQ?;FREQ?;FREQ?;FREQ?;FREQ?;FREQ?;FREQ?")
+            usbtmc_device.write_usbtmc_message("*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?")
             response = usbtmc_device.read_usbtmc_message()
             print("multiple_commands response:", response)
 

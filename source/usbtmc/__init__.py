@@ -4,6 +4,7 @@ import os
 import struct
 from enum import IntEnum
 from typing import NamedTuple, Optional
+import ctypes.util
 
 from .libusb import LibUsbLibrary, LibUsbDeviceHandlePtr, DEFAULT_TIMEOUT
 
@@ -110,6 +111,8 @@ class LibUsbLibraryManager:
             filename = None
             if "LIBUSB_LIBRARY_PATH" in os.environ:
                 filename = os.environ["LIBUSB_LIBRARY_PATH"]
+            else:
+                filename = ctypes.util.find_library("usb-1.0")
             if filename is None:
                 raise UsbTmcError("Don't know where to find libusb. Set the LIBUSB_LIBRARY_PATH environment variable.")
             self._libusb = LibUsbLibrary(filename)

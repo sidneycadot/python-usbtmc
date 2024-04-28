@@ -228,6 +228,9 @@ class LibUsbLibrary:
         lib.libusb_clear_halt.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_ubyte]
         lib.libusb_clear_halt.restype = ctypes.c_int
 
+        lib.libusb_set_auto_detach_kernel_driver.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_int]
+        lib.libusb_set_auto_detach_kernel_driver.restype = ctypes.c_int
+
     def _libusb_exception(self, error_code: int) -> LibUsbError:
         """Look up the description of the error and return a LibUsbError exception."""
         error_message = self.get_error_name(error_code)
@@ -406,6 +409,12 @@ class LibUsbLibrary:
         if result != LIBUSB_SUCCESS:
             raise self._libusb_exception(result)
 
+    def set_auto_detach_kernel_driver(self, device_handle: LibUsbDeviceHandlePtr, enable: bool) -> None:
+        """Configure the auto detach kernel driver setting."""
+        result = self._lib.libusb_set_auto_detach_kernel_driver(device_handle, enable)
+        if result != LIBUSB_SUCCESS:
+            raise self._libusb_exception(result)
+
     def find_and_open_device(self, ctx: LibUsbContextPtr, vid: int, pid: int,
                              serial: Optional[str] = None) -> Optional[LibUsbDeviceHandlePtr]:
         """Enumerate USB devices and open the first one that matches the given parameters.
@@ -463,6 +472,10 @@ class LibUsbLibrary:
             except LibUsbError:
                 # Cannot open the device -- reject.
                 continue
+
+            # Automatically manage the attaching/detaching of kernel drivers upon
+            # claiming and releasing the device.
+            self.set_auto_detach_kernel_driver(device_handle, True)
 
             if serial is None:
                 # No check on the serial number was requested. Accept the device.
