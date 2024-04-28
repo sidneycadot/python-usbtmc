@@ -1,9 +1,9 @@
 Getting libusb for Microsoft Windows
 ------------------------------------
 
-The Windows version of libusb 1.0 can be downloaded from https://libusb.info/. Go to the "Downloads" section,
+The Windows version of libusb-1.0 can be downloaded from https://libusb.info/. Go to the "Downloads" section,
 and click "Latest Windows Binaries". This will download a compressed file containing no less than 12 (!)
-versions of the libusb v1.0 DLL: compiled by six different compiler, for both 32-bits and 64-bits targets.
+versions of the libusb v1.0 DLL: compiled by six different compilers, for both 32-bits and 64-bits targets.
 
 We'll be using the 64-bit version compiled with MinGW64:
 
@@ -14,4 +14,7 @@ We'll be using the 64-bit version compiled with MinGW64:
 Telling python-usbtmc about the file location
 ---------------------------------------------
 
-TBW
+The python-usbtmc package depends on ctypes to load the file "libusb-1.0.dll" as a shared library.
+To be able to do that, we need to tell python-usbtmc module where that file is.
+
+Use the environment variable LIBUSB_LIBRARY_PATH for that.
