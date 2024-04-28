@@ -1,20 +1,14 @@
 #! /usr/bin/env -S python3 -B
 
+""""A basic test program for python-usbtmc."""
+
 import contextlib
 from io import BytesIO
 import os
 import sys
+from typing import Optional
 
-from usbtmc import UsbTmcInterface
-
-if sys.platform == "win32":
-    # In Windows, we need to point to the libusb-1.0 DLL explicitly.
-    filename = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "windows", "libusb-1.0.dll"))
-    if not os.path.exists(filename):
-        raise RuntimeError("Cannot find the library.")
-    print("Setting libusb filename as:", filename)
-    os.environ["LIBUSB_LIBRARY_PATH"] = filename
-    del filename
+from usbtmc import UsbTmcInterface, UsbTmcError
 
 
 def parse_definite_length_binary_block(data: bytes) -> bytes:
@@ -57,72 +51,94 @@ def make_definite_length_binary_block(data: bytes) -> bytes:
     return fo.getvalue()
 
 
-def main():
-
+def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
     """Run USBTMC tests."""
+
+    if sys.platform == "win32" and "LIBUSB_LIBRARY_PATH" not in os.environ:
+        # In Windows, we need to explain to usbtmc where the libusb-1.0 DLL can be found.
+        # Point to a location relative to where this test's source file can be found.
+
+        filename = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../windows/libusb-1.0.dll"))
+        if not os.path.exists(filename):
+            raise RuntimeError("Cannot find the libusb library.")
+        print("Setting libusb filename to '{}'.".format(filename))
+        os.environ["LIBUSB_LIBRARY_PATH"] = filename
+        del filename
 
     print("Running tests ...")
 
-    usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x5707)  # Keysight 33622A
-    #usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x1907)  # Keysight 33622A
-
+    usbtmc_device = UsbTmcInterface(vid=vid, pid=pid, serial=serial)
     usbtmc_device.open()
     with contextlib.closing(usbtmc_device):
 
         device_info = usbtmc_device.get_device_info()
-        print(device_info)
+        print("Device info:", device_info)
 
+        # Define which tests to run.
         test_identification_start = True
+        test_screendump = True
+        write_screendump = False
+        test_waveform_upload = False
+        test_multiple_queries = True
+        test_capabilities_request = True
+        test_indicator_pulse_request = True
+        test_trigger_request = False
+        test_identification_end = True
+
         if test_identification_start:
             usbtmc_device.write_usbtmc_message("*IDN?")
             response = usbtmc_device.read_usbtmc_message()
-            print(response)
+            print("Device identification:", response)
 
-        screendump = True
-        if screendump:
-            usbtmc_device.write_usbtmc_message("HCOPY:SDUMP:DATA:FORMAT BMP")
+        if test_screendump:
+            screendump_format = "bmp"
+            usbtmc_device.write_usbtmc_message("HCOPY:SDUMP:DATA:FORMAT {}".format(screendump_format.upper()))
             usbtmc_device.write_usbtmc_message("HCOPY:SDUMP:DATA?")
             response = usbtmc_device.read_usbtmc_binary_message()
             image = parse_definite_length_binary_block(response)
-            write_screendump = False
             if write_screendump:
-                with open("H:\\vm_shared\\pythontest.bmp", "wb") as fo:
+                with open("screendump.{}".format(screendump_format.lower()), "wb") as fo:
                     fo.write(image)
 
-        make_wave = False
-        if make_wave:
+        if test_waveform_upload:
             num_samples = 20000
             data = bytes(4 * num_samples)
             usbtmc_device.write_usbtmc_message("DATA:VOLATILE:CLEAR")
             usbtmc_device.write_usbtmc_message("DATA:ARBITRARY2:FORMAT ABAB")
             usbtmc_device.write_usbtmc_message("DATA:ARBITRARY2:DAC henk,", make_definite_length_binary_block(data))
 
-        multiple_commands = True
-        if multiple_commands:
+        if test_multiple_queries:
             usbtmc_device.write_usbtmc_message("*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?;*STB?")
             response = usbtmc_device.read_usbtmc_message()
-            print("multiple_commands response:", response)
+            print("Multiple queries response:", response)
 
-        test_capabilities_request = True
         if test_capabilities_request:
             capabilities = usbtmc_device.get_capabilities()
-            print("Capabilities:", capabilities)
+            print("USBTMC capabilities:", capabilities)
 
-        test_indicator_pulse_request = True
         if test_indicator_pulse_request:
             usbtmc_device.indicator_pulse()
 
-        test_trigger_request = False
         if test_trigger_request:
             usbtmc_device.trigger()
 
-        test_identification_end = True
         if test_identification_end:
             usbtmc_device.write_usbtmc_message("*IDN?")
             response = usbtmc_device.read_usbtmc_message()
-            print(response)
+            print("Device identification:", response)
 
     print("All done.")
+
+
+def main():
+    """Select device and run tests."""
+    (vid, pid) = (0x0957, 0x5707)  # Keysight 33622A
+    #(vid, pid) = (0x0957, 0x1907)  # Keysight 55230A
+
+    try:
+        run_tests(vid, pid)
+    except UsbTmcError as exception:
+        print("An exception occurred while executing tests:", exception)
 
 
 if __name__ == "__main__":
