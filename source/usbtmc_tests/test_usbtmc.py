@@ -63,8 +63,8 @@ def main():
 
     print("Running tests ...")
 
-    #usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x5707)  # Keysight 33622A
-    usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x1907)  # Keysight 33622A
+    usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x5707)  # Keysight 33622A
+    #usbtmc_device = UsbTmcInterface(vid=0x0957, pid=0x1907)  # Keysight 33622A
 
     usbtmc_device.open()
     with contextlib.closing(usbtmc_device):

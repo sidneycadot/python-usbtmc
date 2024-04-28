@@ -7,6 +7,7 @@ import sys
 # libusb constants.
 
 LIBUSB_SUCCESS = 0
+LIBUSB_ERROR_NOT_SUPPORTED = -12
 
 LIBUSB_ENDPOINT_IN  = 0x80
 LIBUSB_ENDPOINT_OUT = 0x00
@@ -412,7 +413,7 @@ class LibUsbLibrary:
     def set_auto_detach_kernel_driver(self, device_handle: LibUsbDeviceHandlePtr, enable: bool) -> None:
         """Configure the auto detach kernel driver setting."""
         result = self._lib.libusb_set_auto_detach_kernel_driver(device_handle, enable)
-        if result != LIBUSB_SUCCESS:
+        if result not in (LIBUSB_SUCCESS, LIBUSB_ERROR_NOT_SUPPORTED):
             raise self._libusb_exception(result)
 
     def find_and_open_device(self, ctx: LibUsbContextPtr, vid: int, pid: int,
