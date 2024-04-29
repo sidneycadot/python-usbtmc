@@ -200,16 +200,7 @@ class UsbTmcInterface:
     # All UsbTmcInterface instances will use the same managed instance of libusb and a libusb context.
     _usbtmc_libusb_manager = LibUsbLibraryManager()
 
-    def __init__(self, *, vid: int, pid: int, serial: Optional[str] = None, short_timeout: Optional[float] = None, min_bulk_speed: Optional[float] = None):
-
-        if short_timeout is None:
-            # 100 milliseconds. Used for control transfers and small bulk transfers.
-            short_timeout = 100.0
-
-        if min_bulk_speed is None:
-            # Default value: 100.0 bytes/ms, or, equivalently, 100 kilobytes/second.
-            # This is conservative, leading to long timeout values on large bulk transfers.
-            min_bulk_speed = 100.0
+    def __init__(self, *, vid: int, pid: int, serial: Optional[str] = None, short_timeout: float = 500.0, min_bulk_speed: float = 500.0):
 
         self._vid = vid
         self._pid = pid
@@ -259,6 +250,7 @@ class UsbTmcInterface:
             # Claim the interface.
             self._claim_interface()
 
+            # (QUIRK) - Some devices don't handle the standard 'clear USBTMC interface' sequence correctly.
             match self._quirks.open_reset_method:
                 case 0:
                     pass  # no-op
@@ -347,15 +339,12 @@ class UsbTmcInterface:
         timeout = self._calculate_bulk_timeout(len(transfer))
         self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, transfer, timeout)
 
-    def _get_string_descriptor(self, descriptor_index: int, langid: Optional[int]) -> str:
+    def _get_string_descriptor(self, descriptor_index: int, langid: int = LANGID_ENGLISH_US) -> str:
         """Get string descriptor from device."""
-        if langid is None:
-            # All USBTMC devices are required to support English (US).
-            langid = LANGID_ENGLISH_US
 
         return self._libusb.get_string_descriptor(self._device_handle, descriptor_index, self._short_timeout, langid)
 
-    def get_device_info(self, *, langid: Optional[int] = None) -> UsbDeviceInfo:
+    def get_device_info(self, *, langid: int = LANGID_ENGLISH_US) -> UsbDeviceInfo:
         """Convenience method for getting human-readable information on the currently open USBTMC device."""
         libusb = UsbTmcInterface._usbtmc_libusb_manager.get_libusb()
         device_handle = self._device_handle
@@ -371,7 +360,7 @@ class UsbTmcInterface:
 
         return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
 
-    def write_usbtmc_message(self, *args: (str | bytes | bytearray), encoding: str = 'ascii'):
+    def write_message(self, *args: (str | bytes | bytearray), encoding: str = 'ascii'):
         """Write USBTMC message to the BULK-OUT endpoint.
 
         For now, we write the entire message in a single transfer.
@@ -379,29 +368,29 @@ class UsbTmcInterface:
         """
 
         # Collect all arguments into a single byte array.
-        data = bytearray()
+        message = bytearray()
         for arg in args:
             if isinstance(arg, str):
                 arg = arg.encode(encoding)
             if not isinstance(arg, (bytes, bytearray)):
                 raise UsbTmcError("Bad argument (expected only strings, bytes, and bytearray)")
-            data.extend(arg)
+            message.extend(arg)
 
         btag = self._get_next_bulk_out_btag()
-        transfer_size = len(data)
+        transfer_size = len(message)
         end_of_message = 1
 
         header = struct.pack("<BBBBLL", BulkMessageID.USBTMC_DEV_DEP_MSG_OUT, btag, btag ^ 0xff, 0x00, transfer_size, end_of_message)
-        padding = bytes(-len(data) % 4)
-        message = header + data + padding
+        padding = bytes(-len(message) % 4)
+        message = header + message + padding
 
         self._bulk_transfer_out(message)
 
-    def read_usbtmc_binary_message(self, *, remove_trailing_newline: bool = True) -> bytes:
+    def read_binary_message(self, *, remove_trailing_newline: bool = True) -> bytes:
         """Read a complete USBTMC message from the USBTMC interface's BULK-IN endpoint as a 'bytes' instance."""
 
         # We will collect the data from the separate transfers in the usbtmc_message buffer.
-        usbtmc_message = bytearray()
+        message = bytearray()
 
         while True:
 
@@ -416,7 +405,7 @@ class UsbTmcInterface:
             maxsize = transfer_size + 12
             transfer = self._bulk_transfer_in(maxsize)
 
-            print("bulk-in transfer: {} {} {}".format(transfer_size, maxsize, len(transfer)))
+            # print("bulk-in transfer: {} {} {}".format(transfer_size, maxsize, len(transfer)))
 
             if len(transfer) < 12:
                 raise UsbTmcError("Bulk-in transfer is too short.")
@@ -433,48 +422,58 @@ class UsbTmcInterface:
 
             end_of_message = (attributes & 0x01) != 0
 
-            usbtmc_message.extend(transfer[12:])
+            message.extend(transfer[12:])
 
             if end_of_message:
                 # End Of Message was set on the last transfer; the message is complete.
                 break
 
-        if self._quirks.remove_bulk_padding_bytes:
-            # The interface erroneously reports the transfer size including any padding bytes.
-            # This means that the transfer size will always be divisible by four.
-            if not len(usbtmc_message) % 4 == 0:
-                raise UsbTmcError("Transfer size is not a multiple of 4.")
-            # We can have outer 0, 1, 2, or 3 padding bytes; and we don't really know
-            # how many we have.
-            # We *assume* that the 'real' message (without padding) ends in a '\n'.
-            #
-            # This leaves the following cases:
-            #     padding == 0: message ends with "\x0a"
-            #     padding == 1: message ends with "\x0a\x00"
-            #     padding == 2: message ends with "\x0a\x00\x00"
-            #     padding == 3: message ends with "\x0a\x00\x00\x00"
+        # The message is now complete. We check some conditions where we want to
+        # fiddle with the end of the message.
 
-            if usbtmc_message.endswith(b"\x0a\x00"):
-                del usbtmc_message[-1]
-            elif usbtmc_message.endswith(b"\x0a\x00\x00"):
-                del usbtmc_message[-2:]
-            elif usbtmc_message.endswith(b"\x0a\x00\x00\x00"):
-                del usbtmc_message[-3:]
+        if self._quirks.remove_bulk_padding_bytes:
+            # (QUIRK) The interface of some devices erroneously reports the transfer size
+            # including any padding bytes.
+            #
+            # This means that the transfer size will always be divisible by four.
+            if not len(message) % 4 == 0:
+                raise UsbTmcError("Transfer size is not a multiple of 4.")
+            #
+            # We can have either 0, 1, 2, or 3 padding bytes; and we don't have a
+            # robust way to figure out how many are really there.
+            #
+            # However, if we *assume* that the 'real' message (without padding) ends in a
+            # newline, we can make a good guess, by considering the following cases:
+            #
+            #     padding == 0: message ends with "\x0a"             -- leaves message as-is
+            #     padding == 1: message ends with "\x0a\x00"         -- drop last byte
+            #     padding == 2: message ends with "\x0a\x00\x00"     -- drop last two bytes
+            #     padding == 3: message ends with "\x0a\x00\x00\x00" -- drop last three bytes
+            #
+            # In all other cases, we leave the message as-is.
+
+            if message.endswith(b"\x0a\x00"):
+                del message[-1]
+            elif message.endswith(b"\x0a\x00\x00"):
+                del message[-2:]
+            elif message.endswith(b"\x0a\x00\x00\x00"):
+                del message[-3:]
 
         if remove_trailing_newline:
-            if not usbtmc_message.endswith(b"\n"):
-                raise UsbTmcError("The USBTMC message didn't end with a trailing newline.")
-            #  Remove the trailing newline.
-            del usbtmc_message[-1]
+            # It is often a good idea to drop a newline character from the end of a message.
+            # We do that here if it was requested, and the message indeed ends with a newline;
+            # otherwise, we leave the message as-is.
+            if message.endswith(b"\n"):
+                del message[-1]
 
-        return bytes(usbtmc_message)
+        return bytes(message)
 
-    def read_usbtmc_message(self, *, remove_trailing_newline: bool = True, encoding: str = 'ascii') -> str:
+    def read_message(self, *, remove_trailing_newline: bool = True, encoding: str = 'ascii') -> str:
         """Read a complete USBTMC message from the USBTMC interface's BULK-IN endpoint, decoding it as a string."""
 
-        usbtmc_message = self.read_usbtmc_binary_message(remove_trailing_newline=remove_trailing_newline)
+        message = self.read_binary_message(remove_trailing_newline=remove_trailing_newline)
 
-        return usbtmc_message.decode(encoding)
+        return message.decode(encoding)
 
     def trigger(self):
         """Write TRIGGER request to the BULK-OUT endpoint."""
@@ -486,9 +485,10 @@ class UsbTmcInterface:
         self._bulk_transfer_out(message)
 
     def clear_usbtmc_interface(self) -> None:
-        """Clear the USBTMC interface bulk I/O endpoints.
+        """Clear the USBTMC interface.
 
-        The command sequence is described in 4.2.1.6 and 4.2.1.7 of the USBTMC spec."""
+        The command sequence is described in 4.2.1.6 and 4.2.1.7 of the USBTMC specification.
+        """
 
         if self._quirks.clear_usbtmc_interface_disabled:
             return
@@ -524,7 +524,7 @@ class UsbTmcInterface:
         # Clear the bulk-out endpoint, as prescribed by the standard.
         self._libusb.clear_halt(self._device_handle, self._usbtmc_info.bulk_out_endpoint)
 
-        # QUIRK: Clear the bulk-in endpoint. This is needed by some devices.
+        # (QUIRK) Clear the bulk-in endpoint if the device requires it.
         if self._quirks.usbtmc_clear_sequence_resets_bulk_in:
             # This is NOT prescribed by the standard.
             self._libusb.clear_halt(self._device_handle, self._usbtmc_info.bulk_in_endpoint)
@@ -599,7 +599,7 @@ class UsbTmcInterface:
         if response[0] != ControlStatus.USBTMC_SUCCESS:
             raise UsbTmcControlResponseError(ControlRequest.USB488_REN_CONTROL, ControlStatus(response[0]))
 
-    def go_to_local(self) -> None:
+    def goto_local_control(self) -> None:
         """Go to local control mode.
 
         This is a USB488 request that USBTMC interfaces may or may not support.

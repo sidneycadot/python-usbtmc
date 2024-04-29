@@ -94,8 +94,8 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
         usbtmc_device.clear_usbtmc_interface()
 
         if test_identification_start:
-            usbtmc_device.write_usbtmc_message("*IDN?")
-            response = usbtmc_device.read_usbtmc_message()
+            usbtmc_device.write_message("*IDN?")
+            response = usbtmc_device.read_message()
             print("Device identification:", response)
 
         if test_capabilities_request:
@@ -105,30 +105,30 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
         if test_screendump:
             if device_model in ("Keysight 33622A", "Keysight 52230A"):
                 screendump_format = "bmp"
-                usbtmc_device.write_usbtmc_message("HCOPY:SDUMP:DATA:FORMAT {}".format(screendump_format.upper()))
-                usbtmc_device.write_usbtmc_message("HCOPY:SDUMP:DATA?")
-                response = usbtmc_device.read_usbtmc_binary_message()
+                usbtmc_device.write_message("HCOPY:SDUMP:DATA:FORMAT {}".format(screendump_format.upper()))
+                usbtmc_device.write_message("HCOPY:SDUMP:DATA?")
+                response = usbtmc_device.read_binary_message()
                 image = parse_definite_length_binary_block(response)
                 if write_screendump:
                     with open("screendump.{}".format(screendump_format.lower()), "wb") as fo:
                         fo.write(image)
             elif device_model == "Siglent SDS1204X-E":
-                usbtmc_device.write_usbtmc_message("SCDP")
-                response = usbtmc_device.read_usbtmc_binary_message()
+                usbtmc_device.write_message("SCDP")
+                response = usbtmc_device.read_binary_message()
                 print("@@@", len(response))
 
         if test_waveform_upload:
             num_samples = 20000
             data = bytes(4 * num_samples)
-            usbtmc_device.write_usbtmc_message("DATA:VOLATILE:CLEAR")
-            usbtmc_device.write_usbtmc_message("DATA:ARBITRARY2:FORMAT ABAB")
-            usbtmc_device.write_usbtmc_message("DATA:ARBITRARY2:DAC henk,", make_definite_length_binary_block(data))
+            usbtmc_device.write_message("DATA:VOLATILE:CLEAR")
+            usbtmc_device.write_message("DATA:ARBITRARY2:FORMAT ABAB")
+            usbtmc_device.write_message("DATA:ARBITRARY2:DAC henk,", make_definite_length_binary_block(data))
 
         if test_multiple_queries:
             num_queries = 10
             query = ";".join(["*STB?"] * num_queries) + "\n"
-            usbtmc_device.write_usbtmc_message(query)
-            response = usbtmc_device.read_usbtmc_message()
+            usbtmc_device.write_message(query)
+            response = usbtmc_device.read_message()
             print("Multiple queries response:", response)
             response = response.split(";")
             print("Number of response values:", len(response))
@@ -140,8 +140,8 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
             usbtmc_device.trigger()
 
         if test_identification_end:
-            usbtmc_device.write_usbtmc_message("*IDN?")
-            response = usbtmc_device.read_usbtmc_message()
+            usbtmc_device.write_message("*IDN?")
+            response = usbtmc_device.read_message()
             print("Device identification:", response)
 
     print("All done.")
@@ -149,10 +149,10 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
 def main():
     """Select device and run tests."""
-    (vid, pid) = (0x0957, 0x5707)  # Keysight 33622A
-    #(vid, pid) = (0x0957, 0x1907)  # Keysight 55230A
-    #(vid, pid) = (0xf4ec, 0xee38)   # Siglent SDS 1204X-E
-    #(vid, pid) = (0x1313, 0x8078)  # Thorlabs PM100D
+    # (vid, pid) = (0x0957, 0x5707)  # Keysight 33622A
+    # (vid, pid) = (0x0957, 0x1907)  # Keysight 55230A
+    (vid, pid) = (0xf4ec, 0xee38)    # Siglent SDS 1204X-E
+    # (vid, pid) = (0x1313, 0x8078)  # Thorlabs PM100D
 
     try:
         run_tests(vid, pid)
