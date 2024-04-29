@@ -63,7 +63,7 @@ class UsbDeviceInfo(NamedTuple):
 
 
 class UsbTmcInterfaceInfo(NamedTuple):
-    """Interface info."""
+    """USBTMC interface info."""
     interface_number: int
     interface_protocol: int  # 0: USBTMC, 1: USB488.
     bulk_in_endpoint: int
@@ -236,7 +236,8 @@ class UsbTmcInterface:
 
         device_handle = libusb.find_and_open_device(ctx, self._vid, self._pid, self._serial, self._short_timeout)
         if device_handle is None:
-            raise UsbTmcError("Device not found. Make sure it is connected and the user has I/O permissions.")
+            raise UsbTmcError(f"Device {self._vid:04x}:{self._pid:04x} not found."
+                              " Make sure the device is connected and user permissions allow I/O access to the device.")
 
         # We found the device and opened it. See if it provides a USBTMC interface.
         # If not, we close the device handle and raise an exception.
@@ -297,7 +298,7 @@ class UsbTmcInterface:
             request,                             # bRequest
             w_value,                             # wValue
             self._usbtmc_info.interface_number,  # wIndex
-            w_length,                            # wLength
+            w_length,                            # wLength: the expected number of response bytes.
             self._short_timeout
         )
 
@@ -588,13 +589,13 @@ class UsbTmcInterface:
 
         return status_byte
 
-    def remote_enable_control(self, ren_flag: bool) -> None:
-        """Set REN_CONTROL.
+    def remote_enable_control(self, remote_enable_flag: bool) -> None:
+        """Set remote enable control to True or False.
 
         This is a USB488 request that USBTMC interfaces may or may not support.
         """
 
-        response = self._control_transfer(ControlRequest.USB488_REN_CONTROL, int(ren_flag), 1)
+        response = self._control_transfer(ControlRequest.USB488_REN_CONTROL, int(remote_enable_flag), 1)
         if response[0] != ControlStatus.USBTMC_SUCCESS:
             raise UsbTmcControlResponseError(ControlRequest.USB488_REN_CONTROL, ControlStatus(response[0]))
 

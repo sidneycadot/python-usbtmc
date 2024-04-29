@@ -149,9 +149,9 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
 def main():
     """Select device and run tests."""
-    #(vid, pid) = (0x0957, 0x5707)  # Keysight 33622A
+    (vid, pid) = (0x0957, 0x5707)  # Keysight 33622A
     #(vid, pid) = (0x0957, 0x1907)  # Keysight 55230A
-    (vid, pid) = (0xf4ec, 0xee38)   # Siglent SDS 1204X-E
+    #(vid, pid) = (0xf4ec, 0xee38)   # Siglent SDS 1204X-E
     #(vid, pid) = (0x1313, 0x8078)  # Thorlabs PM100D
 
     try:

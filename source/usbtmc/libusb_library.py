@@ -309,7 +309,8 @@ class LibUsbLibrary:
         if result < 0:
             raise self._libusb_exception(result)
 
-        return bytes(data[:result])  # yielding a bytes instance.
+        # Return a bytes instance.
+        return bytes(data[:result])
 
     def bulk_transfer_out(self, device_handle: LibUsbDeviceHandlePtr, endpoint: int, data: bytes, timeout: int) -> None:
         transferred = ctypes.c_int()
