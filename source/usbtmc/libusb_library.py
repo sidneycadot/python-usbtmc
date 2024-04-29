@@ -9,15 +9,12 @@ import sys
 LIBUSB_SUCCESS = 0
 LIBUSB_ERROR_NOT_SUPPORTED = -12
 
-LIBUSB_ENDPOINT_IN  = 0x80
+LIBUSB_ENDPOINT_IN = 0x80
 LIBUSB_ENDPOINT_OUT = 0x00
 
 LIBUSB_REQUEST_GET_DESCRIPTOR = 0x06
 
 LIBUSB_DT_STRING = 0x03
-
-# Default timeout is 1000 ms.
-DEFAULT_TIMEOUT = 1000  # [ms]
 
 # The value 8 works on 64-bit Microsoft Windows.
 C_STRUCT_ALIGNMENT = 8
@@ -293,14 +290,22 @@ class LibUsbLibrary:
         result = self._lib.libusb_error_name(error_code)
         return result.decode('ascii')
 
-    def control_transfer(self, device_handle: LibUsbDeviceHandlePtr, bmRequestType: int, bRequest: int, wValue: int,
-                         wIndex: int, wLength: int, timeout: int) -> bytes:
+    def control_transfer(self, device_handle: LibUsbDeviceHandlePtr, request_type: int, request: int, value: int,
+                         index: int, length: int, timeout: int) -> bytes:
 
-        data = ctypes.create_string_buffer(wLength)
+        data = ctypes.create_string_buffer(length)
 
         result = self._lib.libusb_control_transfer(
-            device_handle, bmRequestType, bRequest, wValue, wIndex, ctypes.cast(data, ctypes.POINTER(ctypes.c_ubyte)),
-            wLength, timeout)
+            device_handle,
+            request_type,  # mwRequestType
+            request,       # bRequest
+            value,         # wValue
+            index,         # wIndex
+            ctypes.cast(data, ctypes.POINTER(ctypes.c_ubyte)),
+            length,        # wLength
+            timeout
+        )
+
         if result < 0:
             raise self._libusb_exception(result)
 
@@ -308,7 +313,6 @@ class LibUsbLibrary:
 
     def bulk_transfer_out(self, device_handle: LibUsbDeviceHandlePtr, endpoint: int, data: bytes, timeout: int) -> None:
         transferred = ctypes.c_int()
-        # TODO: simplify
         result = self._lib.libusb_bulk_transfer(
             device_handle, endpoint, ctypes.cast(data, ctypes.POINTER(ctypes.c_ubyte)), len(data), transferred, timeout)
         if result != LIBUSB_SUCCESS:
@@ -329,7 +333,7 @@ class LibUsbLibrary:
 
         return data[:transferred.value]
 
-    def get_string_descriptor_languages(self, device_handle: LibUsbDeviceHandlePtr) -> list[int]:
+    def get_string_descriptor_languages(self, device_handle: LibUsbDeviceHandlePtr, timeout: int) -> list[int]:
         """Request LANGID values supported by the device.
 
         These are stored in the special string descriptor 0.
@@ -343,13 +347,17 @@ class LibUsbLibrary:
             (LIBUSB_DT_STRING << 8) | descriptor_index,
             0,
             maxsize,
-            DEFAULT_TIMEOUT
+            timeout
         )
 
-        assert len(response) >= 2
+        if len(response) < 2:
+            raise RuntimeError("Response too short.")
 
-        assert response[0] == len(response)
-        assert response[1] == LIBUSB_DT_STRING
+        if response[0] != len(response):
+            raise RuntimeError("Bad response length.")
+
+        if response[1] == LIBUSB_DT_STRING:
+            raise RuntimeError("Bad descriptor type.")
 
         if len(response) % 2 != 0:
             raise IOError("Response length not even.")
@@ -360,18 +368,13 @@ class LibUsbLibrary:
 
         return languages
 
-    def get_string_descriptor(self, device_handle: LibUsbDeviceHandlePtr, descriptor_index: int,
-                              langid: Optional[int] = None) -> Optional[str]:
+    def get_string_descriptor(self, device_handle: LibUsbDeviceHandlePtr, descriptor_index: int, timeout: int, langid: int) -> Optional[str]:
         """Get a string descriptor value from a device."""
 
         # String descriptor 0 contains LANGID information. The string descriptor value 0 is
         # used to indicate absense of a string descriptor, hence we return None.
         if descriptor_index == 0:
             return None
-
-        if langid is None:
-            # All USBTMC devices are required to support English (US).
-            langid = LANGID_ENGLISH_US
 
         maxsize = 256
         response = self.control_transfer(
@@ -381,7 +384,7 @@ class LibUsbLibrary:
             (LIBUSB_DT_STRING << 8) | descriptor_index,
             langid,
             maxsize,
-            DEFAULT_TIMEOUT
+            timeout
         )
 
         assert response[0] == len(response)
@@ -470,7 +473,7 @@ class LibUsbLibrary:
             raise self._libusb_exception(result)
 
     def find_and_open_device(self, ctx: LibUsbContextPtr, vid: int, pid: int,
-                             serial: Optional[str] = None) -> Optional[LibUsbDeviceHandlePtr]:
+                             serial: Optional[str], timeout: int) -> Optional[LibUsbDeviceHandlePtr]:
         """Enumerate USB devices and open the first one that matches the given parameters.
 
         A device matches the parameters if the following conditions are all true:
@@ -538,7 +541,7 @@ class LibUsbLibrary:
                 continue
 
             try:
-                serial_from_device = self.get_string_descriptor(device_handle, device_descriptor.iSerialNumber)
+                serial_from_device = self.get_string_descriptor(device_handle, device_descriptor.iSerialNumber, timeout)
             except LibUsbError:
                 # Error while retrieving the serial number. Close device, reject.
                 self.close(device_handle)

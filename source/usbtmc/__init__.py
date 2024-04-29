@@ -2,56 +2,56 @@
 
 import os
 import struct
-from enum import IntEnum
 from typing import NamedTuple, Optional
 import ctypes.util
 
-from .libusb_library import LibUsbLibrary, LibUsbDeviceHandlePtr, DEFAULT_TIMEOUT
+from .better_int_enum import BetterIntEnum
+from .libusb_library import LibUsbLibrary, LibUsbDeviceHandlePtr, LANGID_ENGLISH_US
 from .quirks import get_usbtmc_interface_quirks
 
 
-class ControlRequest(IntEnum):
+class ControlRequest(BetterIntEnum):
     """Control-out endpoint requests of the USBTMC protocol and the USB488 sub-protocol."""
-    # These are for the generic USBTMC protocol:
-    INITIATE_ABORT_BULK_OUT     = 1
-    CHECK_ABORT_BULK_OUT_STATUS = 2
-    INITIATE_ABORT_BULK_IN      = 3
-    CHECK_ABORT_BULK_IN_STATUS  = 4
-    INITIATE_CLEAR              = 5
-    CHECK_CLEAR_STATUS          = 6
-    GET_CAPABILITIES            = 7
-    INDICATOR_PULSE             = 64
-    # These are specific to the USB488 sub-protocol:
-    READ_STATUS_BYTE            = 128
-    REN_CONTROL                 = 160
-    GO_TO_LOCAL                 = 161
-    LOCAL_LOCKOUT               = 162
+    # Values defined for the generic USBTMC protocol:
+    USBTMC_INITIATE_ABORT_BULK_OUT     = 1
+    USBTMC_CHECK_ABORT_BULK_OUT_STATUS = 2
+    USBTMC_INITIATE_ABORT_BULK_IN      = 3
+    USBTMC_CHECK_ABORT_BULK_IN_STATUS  = 4
+    USBTMC_INITIATE_CLEAR              = 5
+    USBTMC_CHECK_CLEAR_STATUS          = 6
+    USBTMC_GET_CAPABILITIES            = 7
+    USBTMC_INDICATOR_PULSE             = 64
+    # Values defined for the USB488 sub-protocol:
+    USB488_READ_STATUS_BYTE            = 128
+    USB488_REN_CONTROL                 = 160
+    USB488_GO_TO_LOCAL                 = 161
+    USB488_LOCAL_LOCKOUT               = 162
 
 
-class ControlStatus(IntEnum):
+class ControlStatus(BetterIntEnum):
     """Control-in endpoint status of the USBTMC protocol and the USB488 sub-protocol."""
-    # USBTMC
-    SUCCESS                  = 0x01
-    PENDING                  = 0x02
-    FAILED                   = 0x80
-    TRANSFER_NOT_IN_PROGRESS = 0x81
-    SPLIT_NOT_IN_PROGRESS    = 0x82
-    SPLIT_IN_PROGRESS        = 0x83
-    # USB488
-    INTERRUPT_IN_BUSY        = 0x20
+    # Values defined for the generic USBTMC protocol:
+    USBTMC_SUCCESS                  = 0x01
+    USBTMC_PENDING                  = 0x02
+    USBTMC_FAILED                   = 0x80
+    USBTMC_TRANSFER_NOT_IN_PROGRESS = 0x81
+    USBTMC_SPLIT_NOT_IN_PROGRESS    = 0x82
+    USBTMC_SPLIT_IN_PROGRESS        = 0x83
+    #  Values defined for the USB488 sub-protocol:
+    USB488_INTERRUPT_IN_BUSY        = 0x20
 
 
-class BulkMessageID(IntEnum):
+class BulkMessageID(BetterIntEnum):
     """Bulk-in and bulk-out endpoint message IDs of the USBTMC protocol and the USB488 sub-protocol."""
-    # USBTMC
-    DEV_DEP_MSG_OUT = 1
-    REQUEST_DEV_DEP_MSG_IN = 2
-    DEV_DEP_MSG_IN = 2
-    VENDOR_SPECIFIC_OUT = 126
-    REQUEST_VENDOR_SPECIFIC_IN = 127
-    VENDOR_SPECIFIC_IN = 127
-    # USB488
-    TRIGGER = 128
+    # Values defined for the generic USBTMC protocol:
+    USBTMC_DEV_DEP_MSG_OUT            = 1
+    USBTMC_REQUEST_DEV_DEP_MSG_IN     = 2
+    USBTMC_DEV_DEP_MSG_IN             = 2
+    USBTMC_VENDOR_SPECIFIC_OUT        = 126
+    USBTMC_REQUEST_VENDOR_SPECIFIC_IN = 127
+    USBTMC_VENDOR_SPECIFIC_IN         = 127
+    #  Values defined for the USB488 sub-protocol:
+    USBTMC_TRIGGER                    = 128
 
 
 class UsbDeviceInfo(NamedTuple):
@@ -65,17 +65,20 @@ class UsbDeviceInfo(NamedTuple):
 class UsbTmcInterfaceInfo(NamedTuple):
     """Interface info."""
     interface_number: int
-    interface_protocol: int   # 0: USBTMC. 1: USBTMC+USB488.
+    interface_protocol: int  # 0: USBTMC, 1: USB488.
     bulk_in_endpoint: int
     bulk_out_endpoint: int
 
 
 class UsbTmcInterfaceCapabilities(NamedTuple):
+    """USBTMC capabilities as read from the USBTMC interface."""
+    # Version number and capabilities defined for the generic USBTMC protocol:
     usbtmc_version: int
     usbtmc_indicator_pulse_supported: bool
     usbtmc_interface_is_talk_only: bool
     usbtmc_interface_is_listen_only: bool
     usbtmc_termchar_supported: bool
+    # Version number and capabilities defined for the USB488 sub-protocol:
     usb488_interface_version: int
     usb488_interface_is_488v2: bool
     usb488_interface_accepts_remote_local_commands: bool
@@ -96,11 +99,14 @@ class UsbTmcControlResponseError(Exception):
         self.request = request
         self.status = status
 
+    def __str__(self):
+        return f"UsbTmcControlResponseError(request=ControlRequest.{self.request.name}, status=ControlStatus.{self.status.name})"
+
 
 class LibUsbLibraryManager:
-    """This class manages a LibUsbLibrary instance and a related LibUsbContextPtr.
+    """This class manages a LibUsbLibrary instance and a LibUsbContextPtr.
 
-    It is shared by all UsbTmcInterface instances to gain access to libusb functionality.
+    It is used by all UsbTmcInterface instances to gain access to libusb functionality.
     """
     def __init__(self):
         self._libusb = None
@@ -115,6 +121,7 @@ class LibUsbLibraryManager:
             pass
 
     def get_libusb(self):
+        """Get the libusb library instance; instantiate if necessary."""
         if self._libusb is None:
             # Dynamically load the libusb library.
             if "LIBUSB_LIBRARY_PATH" in os.environ:
@@ -128,6 +135,7 @@ class LibUsbLibraryManager:
         return self._libusb
 
     def get_libusb_context(self):
+        """Get the libusb context instance; initialize if necessary."""
         if self._ctx is None:
             # Initialize a libusb context.
             self._ctx = self.get_libusb().init()
@@ -192,15 +200,23 @@ class UsbTmcInterface:
     # All UsbTmcInterface instances will use the same managed instance of libusb and a libusb context.
     _usbtmc_libusb_manager = LibUsbLibraryManager()
 
-    def __init__(self, *, vid: int, pid: int, serial: Optional[str] = None, timeout: Optional[int] = None):
+    def __init__(self, *, vid: int, pid: int, serial: Optional[str] = None, short_timeout: Optional[float] = None, min_bulk_speed: Optional[float] = None):
 
-        if timeout is None:
-            timeout = DEFAULT_TIMEOUT
+        if short_timeout is None:
+            # 100 milliseconds. Used for control transfers and small bulk transfers.
+            short_timeout = 100.0
+
+        if min_bulk_speed is None:
+            # Default value: 100.0 bytes/ms, or, equivalently, 100 kilobytes/second.
+            # This is conservative, leading to long timeout values on large bulk transfers.
+            min_bulk_speed = 100.0
 
         self._vid = vid
         self._pid = pid
         self._serial = serial
-        self._timeout = timeout
+        self._short_timeout = round(short_timeout)  # Short timeout, in [ms]. Used for control transfers and short bulk transfers.
+        self._min_bulk_speed = min_bulk_speed       # Minimum bulk speed, in [bytes/ms] or, equivalently, [kB/s].
+
         self._quirks = get_usbtmc_interface_quirks(vid, pid)
 
         self._libusb = None
@@ -218,7 +234,7 @@ class UsbTmcInterface:
         libusb = UsbTmcInterface._usbtmc_libusb_manager.get_libusb()
         ctx = UsbTmcInterface._usbtmc_libusb_manager.get_libusb_context()
 
-        device_handle = libusb.find_and_open_device(ctx, self._vid, self._pid, self._serial)
+        device_handle = libusb.find_and_open_device(ctx, self._vid, self._pid, self._serial, self._short_timeout)
         if device_handle is None:
             raise UsbTmcError("Device not found. Make sure it is connected and the user has I/O permissions.")
 
@@ -272,28 +288,27 @@ class UsbTmcInterface:
         self._bulk_out_btag = None
         self._rsb_btag = None
 
-    def get_device_info(self, *, langid: Optional[int] = None) -> UsbDeviceInfo:
-        """Convenience method for getting human-readable information on the currently open USBTMC device."""
-        libusb = UsbTmcInterface._usbtmc_libusb_manager.get_libusb()
-        device_handle = self._device_handle
+    def _control_transfer(self, request: ControlRequest, w_value: int, w_length: int) -> bytes:
+        """Perform a control transfer to the USBTMC interface."""
 
-        device = libusb.get_device(device_handle)
+        response = self._libusb.control_transfer(
+            self._device_handle,
+            0xa1,                                # bmRequestType
+            request,                             # bRequest
+            w_value,                             # wValue
+            self._usbtmc_info.interface_number,  # wIndex
+            w_length,                            # wLength
+            self._short_timeout
+        )
 
-        device_descriptor = libusb.get_device_descriptor(device)
-
-        vid_pid = "{:04x}:{:04x}".format(device_descriptor.idVendor, device_descriptor.idProduct)
-        manufacturer = libusb.get_string_descriptor(device_handle, device_descriptor.iManufacturer, langid=langid)
-        product = libusb.get_string_descriptor(device_handle, device_descriptor.iProduct, langid=langid)
-        serial_number = libusb.get_string_descriptor(device_handle, device_descriptor.iSerialNumber, langid=langid)
-
-        return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
+        return response
 
     def _get_next_bulk_out_btag(self) -> int:
         """Get next bTag value that identifies a BULK-OUT transfer.
 
-        A transfer identifier. The Host must set bTag different than the bTag used in the previous Bulk-OUT Header.
+        A transfer identifier. The Host must set bTag different from the bTag used in the previous Bulk-OUT Header.
         The Host should increment the bTag by 1 each time it sends a new Bulk-OUT Header.
-        The Host must set bTag such that 1<=bTag<=255.
+        The Host must set bTag such that 1 <= bTag <= 255.
         """
         self._bulk_out_btag = self._bulk_out_btag % 255 + 1
         return self._bulk_out_btag
@@ -301,7 +316,7 @@ class UsbTmcInterface:
     def _get_next_rsb_btag(self) -> int:
         """Get next bTag value that identifies a READ_STATUS_BYTE control transfer.
 
-        The bTag value (2 <= bTag <=127) for this request.
+        The bTag value (2 <= bTag <= 127) for this request.
         The device must return this bTag value along with the Status Byte.
         The Host should increment the bTag by 1 for each new READ_STATUS_BYTE request to help identify when the
         response arrives at the Interrupt-IN endpoint.
@@ -317,17 +332,50 @@ class UsbTmcInterface:
         """Let the operating system know that we want to drop exclusive access to the interface."""
         self._libusb.release_interface(self._device_handle, self._usbtmc_info.interface_number)
 
-    def write_usbtmc_message(self, *args: (str | bytes | bytearray), encoding: str = 'ascii', timeout: Optional[int] = None):
+    def _calculate_bulk_timeout(self, num_octets: int) -> int:
+        """Return a pessimistic estimate for the time a bulk transfer can take, in milliseconds."""
+        return self._short_timeout + round(num_octets / self._min_bulk_speed)
+
+    def _bulk_transfer_in(self, maxsize: int) -> bytes:
+        """Perform a single BULK-IN transfer."""
+        timeout = self._calculate_bulk_timeout(maxsize)
+        return self._libusb.bulk_transfer_in(self._device_handle, self._usbtmc_info.bulk_in_endpoint, maxsize, timeout)
+
+    def _bulk_transfer_out(self, transfer: bytes) -> None:
+        """Perform a single BULK-OUT transfer."""
+        timeout = self._calculate_bulk_timeout(len(transfer))
+        self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, transfer, timeout)
+
+    def _get_string_descriptor(self, descriptor_index: int, langid: Optional[int]) -> str:
+        """Get string descriptor from device."""
+        if langid is None:
+            # All USBTMC devices are required to support English (US).
+            langid = LANGID_ENGLISH_US
+
+        return self._libusb.get_string_descriptor(self._device_handle, descriptor_index, self._short_timeout, langid)
+
+    def get_device_info(self, *, langid: Optional[int] = None) -> UsbDeviceInfo:
+        """Convenience method for getting human-readable information on the currently open USBTMC device."""
+        libusb = UsbTmcInterface._usbtmc_libusb_manager.get_libusb()
+        device_handle = self._device_handle
+
+        device = libusb.get_device(device_handle)
+
+        device_descriptor = libusb.get_device_descriptor(device)
+
+        vid_pid = "{:04x}:{:04x}".format(device_descriptor.idVendor, device_descriptor.idProduct)
+        manufacturer = self._get_string_descriptor(device_descriptor.iManufacturer, langid=langid)
+        product = self._get_string_descriptor(device_descriptor.iProduct, langid=langid)
+        serial_number = self._get_string_descriptor(device_descriptor.iSerialNumber, langid=langid)
+
+        return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
+
+    def write_usbtmc_message(self, *args: (str | bytes | bytearray), encoding: str = 'ascii'):
         """Write USBTMC message to the BULK-OUT endpoint.
 
-        A USBTMC message is made up of one or more bulk transfers.
-
-        A bulk transfer is made of one or more bus transactions. Chopping up the bulk transfer into multiple
-        bus transactions is arranged by the OS or chipset.
+        For now, we write the entire message in a single transfer.
+        TODO: split up the message in multiple transfers.
         """
-
-        if timeout is None:
-            timeout = self._timeout
 
         # Collect all arguments into a single byte array.
         data = bytearray()
@@ -342,38 +390,30 @@ class UsbTmcInterface:
         transfer_size = len(data)
         end_of_message = 1
 
-        header = struct.pack("<BBBBLL", BulkMessageID.DEV_DEP_MSG_OUT, btag, btag ^ 0xff, 0x00, transfer_size, end_of_message)
+        header = struct.pack("<BBBBLL", BulkMessageID.USBTMC_DEV_DEP_MSG_OUT, btag, btag ^ 0xff, 0x00, transfer_size, end_of_message)
         padding = bytes(-len(data) % 4)
         message = header + data + padding
 
-        self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, message, timeout)
+        self._bulk_transfer_out(message)
 
-    def read_usbtmc_binary_message(self, *, remove_trailing_newline: bool = True, timeout: Optional[int] = None) -> bytes:
-        """Read USBTMC message from BULK-IN endpoint.
+    def read_usbtmc_binary_message(self, *, remove_trailing_newline: bool = True) -> bytes:
+        """Read a complete USBTMC message from the USBTMC interface's BULK-IN endpoint as a 'bytes' instance."""
 
-        A USBTMC message is made up of one or more bulk transfers.
-
-        A bulk transfer is made of one or more bus transactions. Chopping up the bulk transfer into multiple
-        bus transactions is arranged by the OS or chipset.
-        """
-
-        if timeout is None:
-            timeout = self._timeout
-
-        # We will collect the data from the separate transfers in the usbtmc_message bytearray.
+        # We will collect the data from the separate transfers in the usbtmc_message buffer.
         usbtmc_message = bytearray()
 
         while True:
 
             btag = self._get_next_bulk_out_btag()
-            transfer_size = 1024 * 1024
 
-            request = struct.pack("<BBBBLL", BulkMessageID.REQUEST_DEV_DEP_MSG_IN, btag, btag ^ 0xff, 0x00, transfer_size, 0)
-            self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, request, timeout)
+            transfer_size = 16384
+
+            request = struct.pack("<BBBBLL", BulkMessageID.USBTMC_REQUEST_DEV_DEP_MSG_IN, btag, btag ^ 0xff, 0x00, transfer_size, 0)
+
+            self._bulk_transfer_out(request)
 
             maxsize = transfer_size + 12
-            transfer = self._libusb.bulk_transfer_in(
-                self._device_handle, self._usbtmc_info.bulk_in_endpoint, maxsize, timeout)
+            transfer = self._bulk_transfer_in(maxsize)
 
             print("bulk-in transfer: {} {} {}".format(transfer_size, maxsize, len(transfer)))
 
@@ -382,7 +422,7 @@ class UsbTmcInterface:
 
             (message_id, btag_in, btag_in_inv, reserved) = struct.unpack_from("<BBBB", transfer, 0)
 
-            if message_id != BulkMessageID.DEV_DEP_MSG_IN:
+            if message_id != BulkMessageID.USBTMC_DEV_DEP_MSG_IN:
                 raise UsbTmcError("Bulk-in transfer: bad message ID.")
 
             if (btag_in ^ btag_in_inv) != 0xff:
@@ -428,43 +468,23 @@ class UsbTmcInterface:
 
         return bytes(usbtmc_message)
 
-    def read_usbtmc_message(self, *, remove_trailing_newline: bool = True, encoding: str = 'ascii', timeout: Optional[int] = None) -> str:
-        """Read USBTMC message from BULK-IN endpoint, decoding it as a string."""
+    def read_usbtmc_message(self, *, remove_trailing_newline: bool = True, encoding: str = 'ascii') -> str:
+        """Read a complete USBTMC message from the USBTMC interface's BULK-IN endpoint, decoding it as a string."""
 
-        usbtmc_message = self.read_usbtmc_binary_message(remove_trailing_newline=remove_trailing_newline, timeout=timeout)
+        usbtmc_message = self.read_usbtmc_binary_message(remove_trailing_newline=remove_trailing_newline)
 
         return usbtmc_message.decode(encoding)
 
-    def trigger(self, *, timeout: Optional[int] = None):
+    def trigger(self):
         """Write TRIGGER request to the BULK-OUT endpoint."""
-
-        if timeout is None:
-            timeout = self._timeout
 
         btag = self._get_next_bulk_out_btag()
 
-        transfer = struct.pack("<BBBBLL", BulkMessageID.TRIGGER, btag, btag ^ 0xff, 0x00, 0x00000000, 0x00000000)
+        message = struct.pack("<BBBBLL", BulkMessageID.USBTMC_TRIGGER, btag, btag ^ 0xff, 0x00, 0x00000000, 0x00000000)
 
-        self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, transfer, timeout)
+        self._bulk_transfer_out(message)
 
-    def _control_transfer(self, request: ControlRequest, w_value: int, w_length: int, timeout: Optional[int]) -> bytes:
-        """Perform a control transfer to the USBTMC interface."""
-        if timeout is None:
-            timeout = self._timeout
-
-        response = self._libusb.control_transfer(
-            self._device_handle,
-            0xa1,                                # bmRequestType
-            request,                             # bRequest
-            w_value,                             # wValue
-            self._usbtmc_info.interface_number,  # wIndex
-            w_length,                            # wLength
-            timeout
-        )
-
-        return response
-
-    def clear_usbtmc_interface(self, *, timeout: Optional[int] = None) -> None:
+    def clear_usbtmc_interface(self) -> None:
         """Clear the USBTMC interface bulk I/O endpoints.
 
         The command sequence is described in 4.2.1.6 and 4.2.1.7 of the USBTMC spec."""
@@ -474,19 +494,19 @@ class UsbTmcInterface:
 
         # The sequence starts by sending an INITIATE_CLEAR request to the device.
 
-        response = self._control_transfer(ControlRequest.INITIATE_CLEAR, 0x0000, 1, timeout)
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcControlResponseError(ControlRequest.INITIATE_CLEAR, ControlStatus(response[0]))
+        response = self._control_transfer(ControlRequest.USBTMC_INITIATE_CLEAR, 0x0000, 1)
+        if response[0] != ControlStatus.USBTMC_SUCCESS:
+            raise UsbTmcControlResponseError(ControlRequest.USBTMC_INITIATE_CLEAR, ControlStatus(response[0]))
 
         # The INITIATE_CLEAR request was acknowledged and the device is executing it.
         # We will read the clear status from the device until it is reports success.
 
         while True:
-            response = self._control_transfer(ControlRequest.CHECK_CLEAR_STATUS, 0x0000, 2, timeout)
-            if response[0] == ControlStatus.SUCCESS:
+            response = self._control_transfer(ControlRequest.USBTMC_CHECK_CLEAR_STATUS, 0x0000, 2)
+            if response[0] == ControlStatus.USBTMC_SUCCESS:
                 break
 
-            elif response[0] == ControlStatus.PENDING:
+            elif response[0] == ControlStatus.USBTMC_PENDING:
                 if (response[1] & 0x01) != 0:
                     # If bmClear.D0 = 1, the Host should read from the Bulk-IN endpoint until a short packet is
                     # received. The Host must send CHECK_CLEAR_STATUS at a later time.
@@ -508,14 +528,14 @@ class UsbTmcInterface:
             # This is NOT prescribed by the standard.
             self._libusb.clear_halt(self._device_handle, self._usbtmc_info.bulk_in_endpoint)
 
-    def get_capabilities(self, *, timeout: Optional[int] = None) -> UsbTmcInterfaceCapabilities:
+    def get_capabilities(self) -> UsbTmcInterfaceCapabilities:
         """Get device capabilities.
 
-        This is a USBTMC request that USBTMC devices must handle.
+        This is a USBTMC request that USBTMC devices must support.
         """
-        response = self._control_transfer(ControlRequest.GET_CAPABILITIES, 0x0000, 24, timeout)
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcControlResponseError(ControlRequest.GET_CAPABILITIES, ControlStatus(response[0]))
+        response = self._control_transfer(ControlRequest.USBTMC_GET_CAPABILITIES, 0x0000, 24)
+        if response[0] != ControlStatus.USBTMC_SUCCESS:
+            raise UsbTmcControlResponseError(ControlRequest.USBTMC_GET_CAPABILITIES, ControlStatus(response[0]))
 
         capabilities = UsbTmcInterfaceCapabilities(
             usbtmc_version                                     = response[4] + response[5] * 0x100,
@@ -535,30 +555,31 @@ class UsbTmcInterface:
 
         return capabilities
 
-    def indicator_pulse(self, *, timeout: Optional[int] = None) -> None:
+    def indicator_pulse(self) -> None:
         """Show indicator pulse.
 
-        This is a USBTMC request that USBTMC devices may or may not support.
+        If the device supports the request, the device then turns on an implementation-dependent
+        activity indicator for a human detectable length of time (recommend time is >= 500 milliseconds
+        and <= 1 second). The activity indicator then automatically turns off.
+
+        This is a USBTMC request that USBTMC interfaces may or may not support.
         """
 
-        response = self._control_transfer(ControlRequest.INDICATOR_PULSE, 0x0000, 1, timeout)
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcControlResponseError(ControlRequest.INDICATOR_PULSE, ControlStatus(response[0]))
+        response = self._control_transfer(ControlRequest.USBTMC_INDICATOR_PULSE, 0x0000, 1)
+        if response[0] != ControlStatus.USBTMC_SUCCESS:
+            raise UsbTmcControlResponseError(ControlRequest.USBTMC_INDICATOR_PULSE, ControlStatus(response[0]))
 
-    def read_status_byte(self, *, timeout: Optional[int] = None) -> int:
+    def read_status_byte(self) -> int:
         """Read device status byte.
 
-        This is a USB488 request that USBTMC devices may or may not support.
+        This is a USB488 request that USBTMC interfaces may or may not support.
         """
 
         btag = self._get_next_rsb_btag()
 
-        response = self._control_transfer(ControlRequest.READ_STATUS_BYTE, 0x0000, 3, timeout)
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcControlResponseError(ControlRequest.READ_STATUS_BYTE, ControlStatus(response[0]))
-
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcError("READ_STATUS_BYTE request failed.")
+        response = self._control_transfer(ControlRequest.USB488_READ_STATUS_BYTE, 0x0000, 3)
+        if response[0] != ControlStatus.USBTMC_SUCCESS:
+            raise UsbTmcControlResponseError(ControlRequest.USB488_READ_STATUS_BYTE, ControlStatus(response[0]))
 
         if response[1] != btag:
             raise UsbTmcError("Bad btag value in READ_STATUS_BYTE response.")
@@ -567,32 +588,32 @@ class UsbTmcInterface:
 
         return status_byte
 
-    def ren_control(self, ren_flag: bool, *, timeout: Optional[int] = None) -> None:
+    def remote_enable_control(self, ren_flag: bool) -> None:
         """Set REN_CONTROL.
 
-        This is a USB488 request that USBTMC devices may or may not support.
+        This is a USB488 request that USBTMC interfaces may or may not support.
         """
 
-        response = self._control_transfer(ControlRequest.REN_CONTROL, int(ren_flag), 1, timeout)
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcControlResponseError(ControlRequest.REN_CONTROL, ControlStatus(response[0]))
+        response = self._control_transfer(ControlRequest.USB488_REN_CONTROL, int(ren_flag), 1)
+        if response[0] != ControlStatus.USBTMC_SUCCESS:
+            raise UsbTmcControlResponseError(ControlRequest.USB488_REN_CONTROL, ControlStatus(response[0]))
 
-    def go_to_local(self, *, timeout: Optional[int] = None) -> None:
+    def go_to_local(self) -> None:
         """Go to local control mode.
 
-        This is a USB488 request that USBTMC devices may or may not support.
+        This is a USB488 request that USBTMC interfaces may or may not support.
         """
 
-        response = self._control_transfer(ControlRequest.GO_TO_LOCAL, 0x0000, 1, timeout)
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcControlResponseError(ControlRequest.GO_TO_LOCAL, ControlStatus(response[0]))
+        response = self._control_transfer(ControlRequest.USB488_GO_TO_LOCAL, 0x0000, 1)
+        if response[0] != ControlStatus.USBTMC_SUCCESS:
+            raise UsbTmcControlResponseError(ControlRequest.USB488_GO_TO_LOCAL, ControlStatus(response[0]))
 
-    def local_lockout(self, *, timeout: Optional[int] = None) -> None:
+    def local_lockout(self) -> None:
         """Enable local lockout.
 
-        This is a USB488 request that USBTMC devices may or may not support.
+        This is a USB488 request that USBTMC interfaces may or may not support.
         """
 
-        response = self._control_transfer(ControlRequest.LOCAL_LOCKOUT, 0x0000, 1, timeout)
-        if response[0] != ControlStatus.SUCCESS:
-            raise UsbTmcControlResponseError(ControlRequest.LOCAL_LOCKOUT, ControlStatus(response[0]))
+        response = self._control_transfer(ControlRequest.USB488_LOCAL_LOCKOUT, 0x0000, 1)
+        if response[0] != ControlStatus.USBTMC_SUCCESS:
+            raise UsbTmcControlResponseError(ControlRequest.USB488_LOCAL_LOCKOUT, ControlStatus(response[0]))
