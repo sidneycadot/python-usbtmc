@@ -67,7 +67,9 @@ class UsbTmcInterfaceInfo(NamedTuple):
     interface_number: int
     interface_protocol: int  # 0: USBTMC, 1: USB488.
     bulk_in_endpoint: int
+    bulk_in_endpoint_max_packet_size: int
     bulk_out_endpoint: int
+    bulk_out_endpoint_max_packet_size: int
 
 
 class UsbTmcInterfaceCapabilities(NamedTuple):
@@ -172,6 +174,8 @@ def find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHand
 
                     bulk_in_endpoint = None
                     bulk_out_endpoint = None
+                    bulk_in_endpoint_max_packet_size = None
+                    bulk_out_endpoint_max_packet_size = None
 
                     for endpoint_index in range(altsetting.bNumEndpoints):
 
@@ -180,14 +184,22 @@ def find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHand
                         endpoint_address = endpoint.bEndpointAddress
                         endpoint_direction = (endpoint.bEndpointAddress & 0x80)
                         endpoint_type = endpoint.bmAttributes & 0x0f
+                        endpoint_max_packet_size = endpoint.wMaxPacketSize
 
                         match (endpoint_type, endpoint_direction):
                             case (0x02, 0x80):  # BULK-IN endpoint
                                 bulk_in_endpoint = endpoint_address
+                                bulk_in_endpoint_max_packet_size = endpoint_max_packet_size
                             case (0x02, 0x00):  # BULK-OUT endpoint
                                 bulk_out_endpoint = endpoint_address
+                                bulk_out_endpoint_max_packet_size = endpoint_max_packet_size
 
-                    return UsbTmcInterfaceInfo(altsetting.bInterfaceNumber, altsetting.bInterfaceProtocol, bulk_in_endpoint, bulk_out_endpoint)
+                    return UsbTmcInterfaceInfo(
+                        altsetting.bInterfaceNumber,
+                        altsetting.bInterfaceProtocol,
+                        bulk_in_endpoint, bulk_in_endpoint_max_packet_size,
+                        bulk_out_endpoint, bulk_out_endpoint_max_packet_size
+                    )
         finally:
             libusb.free_config_descriptor(config_descriptor)
 
@@ -379,9 +391,9 @@ class UsbTmcInterface:
 
         btag = self._get_next_bulk_out_btag()
         transfer_size = len(message)
-        end_of_message = 1
+        transfer_attributes = 0x01  # End-Of-Message
 
-        header = struct.pack("<BBBBLL", BulkMessageID.USBTMC_DEV_DEP_MSG_OUT, btag, btag ^ 0xff, 0x00, transfer_size, end_of_message)
+        header = struct.pack("<BBBxLB3x", BulkMessageID.USBTMC_DEV_DEP_MSG_OUT, btag, btag ^ 0xff, transfer_size, transfer_attributes)
         padding = bytes(-len(message) % 4)
         message = header + message + padding
 
@@ -397,21 +409,38 @@ class UsbTmcInterface:
 
             btag = self._get_next_bulk_out_btag()
 
-            transfer_size = 16384
+            max_transfer_size = 16384
+            max_payload_size = max_transfer_size - 12
 
-            request = struct.pack("<BBBBLL", BulkMessageID.USBTMC_REQUEST_DEV_DEP_MSG_IN, btag, btag ^ 0xff, 0x00, transfer_size, 0)
+            request = struct.pack("<BBBxL4x", BulkMessageID.USBTMC_REQUEST_DEV_DEP_MSG_IN, btag, btag ^ 0xff, max_payload_size)
 
             self._bulk_transfer_out(request)
 
-            max_size = transfer_size + 12
-            transfer = self._bulk_transfer_in(max_size)
+            transfer = self._bulk_transfer_in(max_transfer_size)
 
-            # print("bulk-in transfer: {} {} {}".format(transfer_size, maxsize, len(transfer)))
+            # print("bulk-in transfer: max_transfer_size {} max_payload_size {} actual {}".format(max_transfer_size, max_payload_size, len(transfer)))
+
+            # From to the USBTMC specification:
+            #
+            # "The device must always terminate a Bulk-IN transfer by sending a short packet. The short packet
+            #  may be zero-length or non zero-length. The device may send extra alignment bytes (up to
+            #  wMaxPacketSize – 1) to avoid sending a zero-length packet. The alignment bytes should be 0x00-
+            #  valued, but this is not required. A device is not required to send any alignment bytes."
+
+            if len(transfer) % self._usbtmc_info.bulk_in_endpoint_max_packet_size == 0:
+                # The transfer consisted only of full packets.
+                # Hence, the device should send a short packet to indicate that the transfer is done according
+                # to the specification.
+
+                max_dummy_size = self._usbtmc_info.bulk_in_endpoint_max_packet_size
+                dummy = self._bulk_transfer_in(max_dummy_size)
+                if len(dummy) >= self._usbtmc_info.bulk_in_endpoint_max_packet_size:
+                    raise UsbTmcError("Bad dummy packet received.")
 
             if len(transfer) < 12:
                 raise UsbTmcError(f"Bulk-in transfer is too short ({len(transfer)} bytes).")
 
-            (message_id, btag_in, btag_in_inv, reserved) = struct.unpack_from("<BBBB", transfer, 0)
+            (message_id, btag_in, btag_in_inv, payload_size, transfer_attributes) = struct.unpack_from("<BBBxLB3x", transfer)
 
             if message_id != BulkMessageID.USBTMC_DEV_DEP_MSG_IN:
                 raise UsbTmcError("Bulk-in transfer: bad message ID.")
@@ -419,9 +448,10 @@ class UsbTmcInterface:
             if (btag_in ^ btag_in_inv) != 0xff:
                 raise UsbTmcError("Bulk-in transfer: bad btag/btag_inv pair.")
 
-            (transfer_size_readback, attributes) = struct.unpack_from("<LB", transfer, 4)
+            if payload_size != len(transfer) - 12:
+                raise UsbTmcError("Bulk-in transfer: bad payload size.")
 
-            end_of_message = (attributes & 0x01) != 0
+            end_of_message = (transfer_attributes & 0x01) != 0
 
             message.extend(transfer[12:])
 
@@ -429,7 +459,7 @@ class UsbTmcInterface:
                 # End Of Message was set on the last transfer; the message is complete.
                 break
 
-        # The message is now complete. We handle some situations where we want to
+    # The message is now complete. We handle some situations where we want to
         # drop bytes from the end of the received message.
 
         if self._quirks.remove_bulk_padding_bytes:
@@ -485,7 +515,7 @@ class UsbTmcInterface:
 
         btag = self._get_next_bulk_out_btag()
 
-        message = struct.pack("<BBBBLL", BulkMessageID.USBTMC_TRIGGER, btag, btag ^ 0xff, 0x00, 0x00000000, 0x00000000)
+        message = struct.pack("<BBB9x", BulkMessageID.USBTMC_TRIGGER, btag, btag ^ 0xff)
 
         self._bulk_transfer_out(message)
 
@@ -516,13 +546,11 @@ class UsbTmcInterface:
                 if (response[1] & 0x01) != 0:
                     # If bmClear.D0 = 1, the Host should read from the Bulk-IN endpoint until a short packet is
                     # received. The Host must send CHECK_CLEAR_STATUS at a later time.
-                    #
-                    # We have never encountered this behavior even though it is specified in the spec.
-                    # We don't implement it unless we can test it.
-                    #
-                    # If you have a device the behavior of which can reproducibly trigger this exception,
-                    # let us know.
-                    raise UsbTmcError("Short packet read during clear is not yet implemented.")
+                    max_dummy_size = self._usbtmc_info.bulk_in_endpoint_max_packet_size
+                    while True:
+                        dummy = self._bulk_transfer_in(max_dummy_size)
+                        if len(dummy) < self._usbtmc_info.bulk_in_endpoint_max_packet_size:
+                            break
 
         # Out of the CHECK_CLEAR_STATUS loop; the CLEAR has been confirmed.
 
