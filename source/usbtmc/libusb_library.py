@@ -305,7 +305,6 @@ class LibUsbLibrary:
             length,        # wLength
             timeout
         )
-
         if result < 0:
             raise self._libusb_exception(result)
 
@@ -319,7 +318,8 @@ class LibUsbLibrary:
         if result != LIBUSB_SUCCESS:
             raise self._libusb_exception(result)
 
-        assert transferred.value == len(data)
+        if transferred.value != len(data):
+            raise RuntimeError("Expected the value of transferred to be equal to the number of bytes received.")
 
     def bulk_transfer_in(self, device_handle: LibUsbDeviceHandlePtr, endpoint: int, maxsize: int, timeout: int):
 
@@ -388,8 +388,11 @@ class LibUsbLibrary:
             timeout
         )
 
-        assert response[0] == len(response)
-        assert response[1] == LIBUSB_DT_STRING
+        if response[0] != len(response):
+            raise RuntimeError("Expected first byte to be equal to the length of the response.")
+
+        if response[1] != LIBUSB_DT_STRING:
+            raise RuntimeError("Expected string descriptor.")
 
         return response[2:].decode('utf-16-le')
 
