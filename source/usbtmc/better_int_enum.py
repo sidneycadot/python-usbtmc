@@ -1,10 +1,10 @@
-"""This module implements enums with improved printing."""
+"""This module implements IntEnums with improved printing."""
 
 from enum import IntEnum
 
 
 class BetterIntEnum(IntEnum):
-    """BetterIntEnum is an Enum type with better printing of values."""
+    """BetterIntEnum is an IntEnums type with better printing of values."""
     def __repr__(self):
         return f"{self.__class__.__name__}.{self.name}"
 
