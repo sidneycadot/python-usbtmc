@@ -6,6 +6,7 @@ import contextlib
 from io import BytesIO
 import os
 import sys
+import time
 from typing import Optional
 
 from usbtmc import UsbTmcInterface, UsbTmcError
@@ -81,13 +82,14 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
         #
         test_capabilities_request = True
         test_indicator_pulse_request = False
-        test_multiple_queries = True
+        test_two_queries = False
+        test_multiple_queries = False
         test_trigger_request = False
         #
-        test_screendump = True
+        test_screendump = False
         write_screendump = False
         #
-        test_waveform_upload = False
+        test_waveform_upload = True
         #
         test_identification_end = True
         #
@@ -102,14 +104,29 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
             capabilities = usbtmc_device.get_capabilities()
             print("USBTMC capabilities:", capabilities)
 
+        if test_two_queries:
+            for interval in range(0, 1000, 17):
+                query = "*STB?;" + (" " * interval) + "*STB?"
+                usbtmc_device.write_message(query)
+                response = usbtmc_device.read_message()
+                response = response.split(";")
+                if len(response) == 2:
+                    print(f"two queries, total size {len(query)} works")
+                else:
+                    print(f"two queries, total size {len(query)} DOES NOT work")
+                    break
+
         if test_multiple_queries:
-            num_queries = 10
-            query = ";".join(["*STB?"] * num_queries) + "\n"
-            usbtmc_device.write_message(query)
-            response = usbtmc_device.read_message()
-            print("Multiple queries response:", response)
-            response = response.split(";")
-            print("Number of response values:", len(response))
+            for num_queries in range(50, 100, 50):
+                query = ";".join(["*STB?"] * num_queries) + "\n"
+                usbtmc_device.write_message(query)
+                response = usbtmc_device.read_message()
+                response = response.split(";")
+                if len(response) == num_queries:
+                    print(f"num_queries = {num_queries} works")
+                else:
+                    print(f"num_queries = {num_queries} DOES NOT work.")
+                    break
 
         if test_indicator_pulse_request:
             usbtmc_device.indicator_pulse()
@@ -130,15 +147,54 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
             elif device_model == "Siglent SDS1204X-E":
                 usbtmc_device.write_message("SCDP")
                 response = usbtmc_device.read_binary_message()
-                print("@@@", len(response))
 
         if test_waveform_upload:
             if device_model == "Keysight Technologies 33622A":
-                num_samples = 20000
+                num_samples = 100000
                 data = bytes(4 * num_samples)
+
+                usbtmc_device.write_message("*ESE 255; *SRE 191; *OPC")
+
+                register_list = [
+                    "STAT:QUES:COND?",
+                    "STAT:QUES:EVEN?",
+                    "STAT:QUES:ENAB?",
+                    "STAT:OPER:COND?",
+                    "STAT:OPER:EVEN?",
+                    "STAT:OPER:ENAB?",
+                    "*ESR?",
+                    "*ESE?",
+                    "*STB?",
+                    "*SRE?"
+                ]
+
+                for query in register_list:
+                    usbtmc_device.write_message(query)
+                    response = usbtmc_device.read_message()
+                    print(f"query: {query:20} response: {response:20}")
+
+                for query in register_list:
+                    usbtmc_device.write_message(query)
+                    response = usbtmc_device.read_message()
+                    print(f"query: {query:20} response: {response:20}")
+
                 usbtmc_device.write_message("DATA:VOLATILE:CLEAR")
                 usbtmc_device.write_message("DATA:ARBITRARY2:FORMAT ABAB")
-                usbtmc_device.write_message("DATA:ARBITRARY2:DAC henk,", make_definite_length_binary_block(data))
+                usbtmc_device.write_message("DATA:ARBITRARY2:FORMAT ABAB")
+                usbtmc_device.write_message("DATA:ARBITRARY2:DAC awg_test,", make_definite_length_binary_block(data))
+
+                for i in range(20):
+                    stb = usbtmc_device.read_status_byte()
+                    print("stb:", stb)
+                    time.sleep(0.200)
+
+                #usbtmc_device.write_message("*STB?")
+                #response = usbtmc_device.read_message()
+                #print("STB response:", response)
+
+                #usbtmc_device.write_message("*OPC?")
+                #response = usbtmc_device.read_message()
+                #print("response:", response)
 
         if test_identification_end:
             usbtmc_device.write_message("*IDN?")
