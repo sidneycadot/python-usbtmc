@@ -59,7 +59,7 @@ class UsbDeviceInfo(NamedTuple):
     vid_pid: str
     manufacturer: str
     product: str
-    serial_number: Optional[str]
+    serial_number: Optional[str]  # May be absent.
 
 
 class UsbTmcInterfaceInfo(NamedTuple):
@@ -100,7 +100,7 @@ class UsbTmcControlResponseError(Exception):
         self.status = status
 
     def __str__(self):
-        return f"UsbTmcControlResponseError(request=ControlRequest.{self.request.name}, status=ControlStatus.{self.status.name})"
+        return f"UsbTmcControlResponseError(request={self.request}, status={self.status})"
 
 
 class LibUsbLibraryManager:
@@ -121,7 +121,7 @@ class LibUsbLibraryManager:
             pass
 
     def get_libusb(self):
-        """Get the libusb library instance; instantiate if necessary."""
+        """Get the libusb library instance; instantiate it if necessary."""
         if self._libusb is None:
             # Dynamically load the libusb library.
             if "LIBUSB_LIBRARY_PATH" in os.environ:
@@ -135,7 +135,7 @@ class LibUsbLibraryManager:
         return self._libusb
 
     def get_libusb_context(self):
-        """Get the libusb context instance; initialize if necessary."""
+        """Get the libusb context instance; initialize one if necessary."""
         if self._ctx is None:
             # Initialize a libusb context.
             self._ctx = self.get_libusb().init()
@@ -238,7 +238,7 @@ class UsbTmcInterface:
             libusb.close(device_handle)
             raise UsbTmcError("The device doesn't have a USBTMC interface.")
 
-        # Declare the device open, but prepare to close it when a subsequent operation fails.
+        # Declare the device open, but prepare to close it when a subsequent initialization operation fails.
 
         self._libusb = libusb
         self._device_handle = device_handle
@@ -257,7 +257,7 @@ class UsbTmcInterface:
                 case 1:
                     self.clear_usbtmc_interface()
 
-        except:
+        except Exception:
             # If any exception happened during the first uses of the newly opened device,
             # we immediately close the device and re-raise the exception.
             self.close()
@@ -329,13 +329,14 @@ class UsbTmcInterface:
         """Return a pessimistic estimate for the time a bulk transfer can take, in milliseconds."""
         return self._short_timeout + round(num_octets / self._min_bulk_speed)
 
-    def _bulk_transfer_in(self, maxsize: int) -> bytes:
+    def _bulk_transfer_in(self, max_size: int) -> bytes:
         """Perform a single BULK-IN transfer."""
-        timeout = self._calculate_bulk_timeout(maxsize)
-        return self._libusb.bulk_transfer_in(self._device_handle, self._usbtmc_info.bulk_in_endpoint, maxsize, timeout)
+        timeout = self._calculate_bulk_timeout(max_size)
+        return self._libusb.bulk_transfer_in(self._device_handle, self._usbtmc_info.bulk_in_endpoint, max_size, timeout)
 
     def _bulk_transfer_out(self, transfer: bytes) -> None:
         """Perform a single BULK-OUT transfer."""
+
         timeout = self._calculate_bulk_timeout(len(transfer))
         self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, transfer, timeout)
 
@@ -360,11 +361,11 @@ class UsbTmcInterface:
 
         return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
 
-    def write_message(self, *args: (str | bytes | bytearray), encoding: str = 'ascii'):
+    def write_message(self, *args: (str | bytes), encoding: str = 'ascii'):
         """Write USBTMC message to the BULK-OUT endpoint.
 
         For now, we write the entire message in a single transfer.
-        TODO: split up the message in multiple transfers.
+        TODO: Allow splitting up the message in multiple transfers.
         """
 
         # Collect all arguments into a single byte array.
@@ -373,7 +374,7 @@ class UsbTmcInterface:
             if isinstance(arg, str):
                 arg = arg.encode(encoding)
             if not isinstance(arg, (bytes, bytearray)):
-                raise UsbTmcError("Bad argument (expected only strings, bytes, and bytearray)")
+                raise UsbTmcError("Bad argument (expected only strings, bytes, and bytearray).")
             message.extend(arg)
 
         btag = self._get_next_bulk_out_btag()
@@ -402,13 +403,13 @@ class UsbTmcInterface:
 
             self._bulk_transfer_out(request)
 
-            maxsize = transfer_size + 12
-            transfer = self._bulk_transfer_in(maxsize)
+            max_size = transfer_size + 12
+            transfer = self._bulk_transfer_in(max_size)
 
             # print("bulk-in transfer: {} {} {}".format(transfer_size, maxsize, len(transfer)))
 
             if len(transfer) < 12:
-                raise UsbTmcError("Bulk-in transfer is too short.")
+                raise UsbTmcError(f"Bulk-in transfer is too short ({len(transfer)} bytes).")
 
             (message_id, btag_in, btag_in_inv, reserved) = struct.unpack_from("<BBBB", transfer, 0)
 
@@ -416,7 +417,7 @@ class UsbTmcInterface:
                 raise UsbTmcError("Bulk-in transfer: bad message ID.")
 
             if (btag_in ^ btag_in_inv) != 0xff:
-                raise UsbTmcError("Bulk0in transfer: bad btag/btag_inv pair.")
+                raise UsbTmcError("Bulk-in transfer: bad btag/btag_inv pair.")
 
             (transfer_size_readback, attributes) = struct.unpack_from("<LB", transfer, 4)
 
@@ -428,17 +429,19 @@ class UsbTmcInterface:
                 # End Of Message was set on the last transfer; the message is complete.
                 break
 
-        # The message is now complete. We check some conditions where we want to
-        # fiddle with the end of the message.
+        # The message is now complete. We handle some situations where we want to
+        # drop bytes from the end of the received message.
 
         if self._quirks.remove_bulk_padding_bytes:
+
             # (QUIRK) The interface of some devices erroneously reports the transfer size
             # including any padding bytes.
             #
             # This means that the transfer size will always be divisible by four.
+
             if not len(message) % 4 == 0:
-                raise UsbTmcError("Transfer size is not a multiple of 4.")
-            #
+                raise UsbTmcError("Bulk transfer size is not a multiple of 4.")
+
             # We can have either 0, 1, 2, or 3 padding bytes; and we don't have a
             # robust way to figure out how many are really there.
             #
@@ -460,9 +463,11 @@ class UsbTmcInterface:
                 del message[-3:]
 
         if remove_trailing_newline:
-            # It is often a good idea to drop a newline character from the end of a message.
-            # We do that here if it was requested, and the message indeed ends with a newline;
+
+            # More often than not, it is useful to drop a terminating newline character from the end of
+            # a message. We do that here if it was requested, and the message indeed ends with a newline;
             # otherwise, we leave the message as-is.
+
             if message.endswith(b"\n"):
                 del message[-1]
 
@@ -476,7 +481,7 @@ class UsbTmcInterface:
         return message.decode(encoding)
 
     def trigger(self):
-        """Write TRIGGER request to the BULK-OUT endpoint."""
+        """Send trigger request via the BULK-OUT endpoint."""
 
         btag = self._get_next_bulk_out_btag()
 
@@ -530,7 +535,7 @@ class UsbTmcInterface:
             self._libusb.clear_halt(self._device_handle, self._usbtmc_info.bulk_in_endpoint)
 
     def get_capabilities(self) -> UsbTmcInterfaceCapabilities:
-        """Get device capabilities.
+        """Get USBTMC interface capabilities.
 
         This is a USBTMC request that USBTMC devices must support.
         """
@@ -583,14 +588,14 @@ class UsbTmcInterface:
             raise UsbTmcControlResponseError(ControlRequest.USB488_READ_STATUS_BYTE, ControlStatus(response[0]))
 
         if response[1] != btag:
-            raise UsbTmcError("Bad btag value in READ_STATUS_BYTE response.")
+            raise UsbTmcError(f"Unexpected btag value in READ_STATUS_BYTE response (expected 0x{btag:02x}, got 0x{response[1]:02x}).")
 
         status_byte = response[2]
 
         return status_byte
 
     def remote_enable_control(self, remote_enable_flag: bool) -> None:
-        """Set remote enable control to True or False.
+        """Enable or disable remote control.
 
         This is a USB488 request that USBTMC interfaces may or may not support.
         """
