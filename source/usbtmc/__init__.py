@@ -427,6 +427,12 @@ class UsbTmcInterface:
             #  wMaxPacketSize – 1) to avoid sending a zero-length packet. The alignment bytes should be 0x00-
             #  valued, but this is not required. A device is not required to send any alignment bytes."
 
+            if not len(transfer) % 4 == 0:
+                raise UsbTmcError("Bulk transfer size is not a multiple of 4 bytes.")
+
+            if len(transfer) < 12:
+                raise UsbTmcError(f"Bulk-in transfer is too short ({len(transfer)} bytes).")
+
             if len(transfer) % self._usbtmc_info.bulk_in_endpoint_max_packet_size == 0:
                 # The transfer consisted only of full packets.
                 # Hence, the device should send a short packet to indicate that the transfer is done according
@@ -436,9 +442,6 @@ class UsbTmcInterface:
                 dummy = self._bulk_transfer_in(max_dummy_size)
                 if len(dummy) >= self._usbtmc_info.bulk_in_endpoint_max_packet_size:
                     raise UsbTmcError("Bad dummy packet received.")
-
-            if len(transfer) < 12:
-                raise UsbTmcError(f"Bulk-in transfer is too short ({len(transfer)} bytes).")
 
             (message_id, btag_in, btag_in_inv, payload_size, transfer_attributes) = struct.unpack_from("<BBBxLB3x", transfer)
 
@@ -459,29 +462,26 @@ class UsbTmcInterface:
                 # End Of Message was set on the last transfer; the message is complete.
                 break
 
-    # The message is now complete. We handle some situations where we want to
+        # The message is now complete. We handle some situations where we want to
         # drop bytes from the end of the received message.
 
         if self._quirks.remove_bulk_padding_bytes:
 
             # (QUIRK) The interface of some devices erroneously reports the transfer size
-            # including any padding bytes.
+            #         including any padding bytes.
             #
-            # This means that the transfer size will always be divisible by four.
-
-            if not len(message) % 4 == 0:
-                raise UsbTmcError("Bulk transfer size is not a multiple of 4.")
-
             # We can have either 0, 1, 2, or 3 padding bytes; and we don't have a
             # robust way to figure out how many are really there.
             #
             # However, if we *assume* that the 'real' message (without padding) ends in a
             # newline, we can make a good guess, by considering the following cases:
             #
-            #     padding == 0: message ends with "\x0a"             -- leaves message as-is
-            #     padding == 1: message ends with "\x0a\x00"         -- drop last byte
-            #     padding == 2: message ends with "\x0a\x00\x00"     -- drop last two bytes
-            #     padding == 3: message ends with "\x0a\x00\x00\x00" -- drop last three bytes
+            #    number of padding bytes    end-of-message        action
+            #    -----------------------    ------------------    ---------------------
+            #               0               "\x0a"                leaves message as-is
+            #               1               "\x0a\x00"            drop last byte
+            #               2               "\x0a\x00\x00"        drop last two bytes
+            #               3               "\x0a\x00\x00\x00"    drop last three bytes
             #
             # In all other cases, we leave the message as-is.
 
