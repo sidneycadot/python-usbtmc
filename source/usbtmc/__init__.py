@@ -9,6 +9,8 @@ from .better_int_enum import BetterIntEnum
 from .libusb_library import LibUsbLibrary, LibUsbDeviceHandlePtr, LANGID_ENGLISH_US
 from .quirks import get_usbtmc_interface_quirks
 
+BULK_TRANSFER_HEADER_SIZE = 12  # All Bulk-In and Bulk-Out transfers have a 12-byte header describing the transfer.
+
 
 class ControlRequest(BetterIntEnum):
     """Control-out endpoint requests of the USBTMC protocol and the USB488 sub-protocol."""
@@ -374,11 +376,7 @@ class UsbTmcInterface:
         return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
 
     def write_message(self, *args: (str | bytes), encoding: str = 'ascii'):
-        """Write USBTMC message to the BULK-OUT endpoint.
-
-        For now, we write the entire message in a single transfer.
-        TODO: Allow splitting up the message in multiple transfers.
-        """
+        """Write USBTMC message to the BULK-OUT endpoint."""
 
         # Collect all arguments into a single byte array.
         message = bytearray()
@@ -389,15 +387,30 @@ class UsbTmcInterface:
                 raise UsbTmcError("Bad argument (expected only strings, bytes, and bytearray).")
             message.extend(arg)
 
-        btag = self._get_next_bulk_out_btag()
-        transfer_size = len(message)
-        transfer_attributes = 0x01  # End-Of-Message
+        max_bulk_out_transfer_size = 16384
+        max_payload_size = max_bulk_out_transfer_size - BULK_TRANSFER_HEADER_SIZE
 
-        header = struct.pack("<BBBxLB3x", BulkMessageID.USBTMC_DEV_DEP_MSG_OUT, btag, btag ^ 0xff, transfer_size, transfer_attributes)
-        padding = bytes(-len(message) % 4)
-        message = header + message + padding
+        offset = 0
+        while True:
+            btag = self._get_next_bulk_out_btag()
+            payload_size = min(max_payload_size, len(message) - offset)
+            if offset + payload_size == len(message):
+                transfer_attributes = 0x01  # End-Of-Message
+            else:
+                transfer_attributes = 0x00  # Not End-Of-Message
 
-        self._bulk_transfer_out(message)
+            header = struct.pack("<BBBxLB3x", BulkMessageID.USBTMC_DEV_DEP_MSG_OUT, btag, btag ^ 0xff, payload_size, transfer_attributes)
+            padding = bytes(-payload_size % 4)
+            transfer = header + message[offset:offset + payload_size] + padding
+
+            self._bulk_transfer_out(transfer)
+
+            offset += payload_size
+
+            if offset == len(message):
+                break
+
+        # The transfer is done.
 
     def read_binary_message(self, *, remove_trailing_newline: bool = True) -> bytes:
         """Read a complete USBTMC message from the USBTMC interface's BULK-IN endpoint as a 'bytes' instance."""
@@ -410,7 +423,7 @@ class UsbTmcInterface:
             btag = self._get_next_bulk_out_btag()
 
             max_transfer_size = 16384
-            max_payload_size = max_transfer_size - 12
+            max_payload_size = max_transfer_size - BULK_TRANSFER_HEADER_SIZE
 
             request = struct.pack("<BBBxL4x", BulkMessageID.USBTMC_REQUEST_DEV_DEP_MSG_IN, btag, btag ^ 0xff, max_payload_size)
 
@@ -427,10 +440,7 @@ class UsbTmcInterface:
             #  wMaxPacketSize – 1) to avoid sending a zero-length packet. The alignment bytes should be 0x00-
             #  valued, but this is not required. A device is not required to send any alignment bytes."
 
-            if not len(transfer) % 4 == 0:
-                raise UsbTmcError("Bulk transfer size is not a multiple of 4 bytes.")
-
-            if len(transfer) < 12:
+            if len(transfer) < BULK_TRANSFER_HEADER_SIZE:
                 raise UsbTmcError(f"Bulk-in transfer is too short ({len(transfer)} bytes).")
 
             if len(transfer) % self._usbtmc_info.bulk_in_endpoint_max_packet_size == 0:
@@ -451,12 +461,12 @@ class UsbTmcInterface:
             if (btag_in ^ btag_in_inv) != 0xff:
                 raise UsbTmcError("Bulk-in transfer: bad btag/btag_inv pair.")
 
-            if payload_size != len(transfer) - 12:
+            if payload_size != len(transfer) - BULK_TRANSFER_HEADER_SIZE:
                 raise UsbTmcError("Bulk-in transfer: bad payload size.")
 
             end_of_message = (transfer_attributes & 0x01) != 0
 
-            message.extend(transfer[12:])
+            message.extend(transfer[BULK_TRANSFER_HEADER_SIZE:])
 
             if end_of_message:
                 # End Of Message was set on the last transfer; the message is complete.
@@ -470,6 +480,12 @@ class UsbTmcInterface:
             # (QUIRK) The interface of some devices erroneously reports the transfer size
             #         including any padding bytes.
             #
+            # These devices will (should) always report a transfer_size that is a multiple
+            # of 4 bytes.
+
+            if not len(transfer) % 4 == 0:
+                raise UsbTmcError("Bulk transfer size is not a multiple of 4 bytes.")
+
             # We can have either 0, 1, 2, or 3 padding bytes; and we don't have a
             # robust way to figure out how many are really there.
             #
@@ -611,7 +627,7 @@ class UsbTmcInterface:
 
         btag = self._get_next_rsb_btag()
 
-        response = self._control_transfer(ControlRequest.USB488_READ_STATUS_BYTE, 0x0000, 3)
+        response = self._control_transfer(ControlRequest.USB488_READ_STATUS_BYTE, btag, 3)
         if response[0] != ControlStatus.USBTMC_SUCCESS:
             raise UsbTmcControlResponseError(ControlRequest.USB488_READ_STATUS_BYTE, ControlStatus(response[0]))
 
