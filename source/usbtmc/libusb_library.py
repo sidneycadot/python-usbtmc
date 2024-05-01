@@ -394,7 +394,7 @@ class LibUsbLibrary:
         if response[1] != LIBUSB_DT_STRING:
             raise RuntimeError("Expected string descriptor.")
 
-        return response[2:].decode('utf-16-le')
+        return response[2:].decode('utf_16_le')
 
     def open(self, device: LibUsbDevicePtr) -> LibUsbDeviceHandlePtr:
         """Open the libusb device, yielding a device handle that we can use for I/O.
