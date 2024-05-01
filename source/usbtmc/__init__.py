@@ -1,4 +1,21 @@
-"""The usbtmc package provides a cross-platform user-space USBTMC driver."""
+"""The usbtmc package provides a cross-platform user-space USBTMC driver.
+
+This package implements the USBTMC protocol and the USBTMC-USB488 sub-protocol as described in [1] and [2].
+
+Some protocol features that are not very useful in most use-cases were omitted. In particular:
+
+* For Bulk I/O, only device-dependent messages are supported. Support for vendor-specific messages is not implemented.
+* For Bulk I/O, the "TermChar" feature is not supported. This feature allows the Host to request a specific termination
+  character to end responses from the Device.
+* Functionality related to the Interrupt-IN endpoint is not supported.
+* The ABORT_BULK_OUT and ABORT_BULK_IN control sequences are not supported. (The INITIATE_CLEAR / CHECK_CLEAR_STATUS sequence is, though).
+
+[1] Universal Serial Bus Test and Measurement Class Specification (USBTMC), Revision 1.0, April 14, 2003
+[2] Universal Serial Bus Test and Measurement Class, Subclass USB488 Specification (USBTMC-USB488), Revision 1.0, April 14, 2003
+
+[1] and [2] can be downloaded from here: https://www.usb.org/sites/default/files/USBTMC_1_006a.zip.
+
+"""
 
 import os
 import struct
@@ -8,6 +25,7 @@ import ctypes.util
 from .better_int_enum import BetterIntEnum
 from .libusb_library import LibUsbLibrary, LibUsbDeviceHandlePtr, LANGID_ENGLISH_US
 from .quirks import get_usbtmc_interface_quirks
+
 
 BULK_TRANSFER_HEADER_SIZE = 12  # All Bulk-In and Bulk-Out transfers have a 12-byte header describing the transfer.
 
@@ -387,11 +405,16 @@ class UsbTmcInterface:
                 raise UsbTmcError("Bad argument (expected only strings, bytes, and bytearray).")
             message.extend(arg)
 
+        if len(message) == 0:
+            # The USBTMC standard forbids Host-to-Device bulk transfers without payload,
+            # meaning we have no way to handle zero-byte messages.
+            raise UsbTmcError("Unable to send a zero-length message.")
+
         max_bulk_out_transfer_size = 16384
         max_payload_size = max_bulk_out_transfer_size - BULK_TRANSFER_HEADER_SIZE
 
         offset = 0
-        while True:
+        while offset != len(message):
             btag = self._get_next_bulk_out_btag()
             payload_size = min(max_payload_size, len(message) - offset)
             if offset + payload_size == len(message):
@@ -406,11 +429,6 @@ class UsbTmcInterface:
             self._bulk_transfer_out(transfer)
 
             offset += payload_size
-
-            if offset == len(message):
-                break
-
-        # The transfer is done.
 
     def read_binary_message(self, *, remove_trailing_newline: bool = True) -> bytes:
         """Read a complete USBTMC message from the USBTMC interface's BULK-IN endpoint as a 'bytes' instance."""
@@ -433,24 +451,23 @@ class UsbTmcInterface:
 
             # print("bulk-in transfer: max_transfer_size {} max_payload_size {} actual {}".format(max_transfer_size, max_payload_size, len(transfer)))
 
-            # From to the USBTMC specification:
-            #
-            # "The device must always terminate a Bulk-IN transfer by sending a short packet. The short packet
-            #  may be zero-length or non zero-length. The device may send extra alignment bytes (up to
-            #  wMaxPacketSize – 1) to avoid sending a zero-length packet. The alignment bytes should be 0x00-
-            #  valued, but this is not required. A device is not required to send any alignment bytes."
-
             if len(transfer) < BULK_TRANSFER_HEADER_SIZE:
                 raise UsbTmcError(f"Bulk-in transfer is too short ({len(transfer)} bytes).")
 
             if len(transfer) % self._usbtmc_info.bulk_in_endpoint_max_packet_size == 0:
-                # The transfer consisted only of full packets.
-                # Hence, the device should send a short packet to indicate that the transfer is done according
-                # to the specification.
+
+                # From to the USBTMC specification:
+                #
+                # "The device must always terminate a Bulk-IN transfer by sending a short packet. The short packet
+                #  may be zero-length or non zero-length. The device may send extra alignment bytes (up to
+                #  wMaxPacketSize – 1) to avoid sending a zero-length packet. The alignment bytes should be 0x00-
+                #  valued, but this is not required. A device is not required to send any alignment bytes."
+                #
+                # In accordance with this, we expect to see a short packet here.
 
                 max_dummy_size = self._usbtmc_info.bulk_in_endpoint_max_packet_size
-                dummy = self._bulk_transfer_in(max_dummy_size)
-                if len(dummy) >= self._usbtmc_info.bulk_in_endpoint_max_packet_size:
+                dummy_transfer = self._bulk_transfer_in(max_dummy_size)
+                if len(dummy_transfer) >= self._usbtmc_info.bulk_in_endpoint_max_packet_size:
                     raise UsbTmcError("Bad dummy packet received.")
 
             (message_id, btag_in, btag_in_inv, payload_size, transfer_attributes) = struct.unpack_from("<BBBxLB3x", transfer)
@@ -463,6 +480,10 @@ class UsbTmcInterface:
 
             if payload_size != len(transfer) - BULK_TRANSFER_HEADER_SIZE:
                 raise UsbTmcError("Bulk-in transfer: bad payload size.")
+
+            if payload_size == 0:
+                # The USBTMC standard forbids this.
+                raise UsbTmcError("Device sent a Bulk-In message without payload.")
 
             end_of_message = (transfer_attributes & 0x01) != 0
 
@@ -564,8 +585,8 @@ class UsbTmcInterface:
                     # received. The Host must send CHECK_CLEAR_STATUS at a later time.
                     max_dummy_size = self._usbtmc_info.bulk_in_endpoint_max_packet_size
                     while True:
-                        dummy = self._bulk_transfer_in(max_dummy_size)
-                        if len(dummy) < self._usbtmc_info.bulk_in_endpoint_max_packet_size:
+                        dummy_transfer = self._bulk_transfer_in(max_dummy_size)
+                        if len(dummy_transfer) < self._usbtmc_info.bulk_in_endpoint_max_packet_size:
                             break
 
         # Out of the CHECK_CLEAR_STATUS loop; the CLEAR has been confirmed.
