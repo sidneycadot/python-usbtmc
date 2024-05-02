@@ -1,4 +1,4 @@
-"""Minimalistic ctypes-based libusb-1.0 support for implementing python-usbtmc."""
+"""Minimalistic ctypes-based libusb-1.0 support for implementing USBTMC support."""
 
 from typing import Optional
 import ctypes
@@ -19,9 +19,10 @@ LIBUSB_DT_STRING = 0x03
 # The value 8 works on 64-bit Microsoft Windows.
 C_STRUCT_ALIGNMENT = 8
 
-LANGID_ENGLISH_US = 0x0409
-DEFAULT_LANGID = LANGID_ENGLISH_US  # Fallback in case no language ID is specified.
+LANGID_ENGLISH_US = 0x0409  # USBTMC devices must support this language for string descriptors.
 
+
+# libusb types.
 
 class LibUsbContext(ctypes.Structure):
     """Opaque type representing a libusb context."""
@@ -48,30 +49,6 @@ class LibUsbDeviceHandle(ctypes.Structure):
 
 
 LibUsbDeviceHandlePtr = ctypes.POINTER(LibUsbDeviceHandle)
-
-
-class LibUsbDeviceDescriptor(ctypes.Structure):
-    """A libusb device descriptor."""
-    _pack_ = C_STRUCT_ALIGNMENT
-    _fields_ = [
-        ("bLength", ctypes.c_uint8),
-        ("bDescriptorType", ctypes.c_uint8),
-        ("bcdUSB", ctypes.c_uint16),
-        ("bDeviceClass", ctypes.c_uint8),
-        ("bDeviceSubClass", ctypes.c_uint8),
-        ("bDeviceProtocol", ctypes.c_uint8),
-        ("bMaxPacketSize0", ctypes.c_uint8),
-        ("idVendor", ctypes.c_uint16),
-        ("idProduct", ctypes.c_uint16),
-        ("bcdDevice", ctypes.c_uint16),
-        ("iManufacturer", ctypes.c_uint8),
-        ("iProduct", ctypes.c_uint8),
-        ("iSerialNumber", ctypes.c_uint8),
-        ("bNumConfigurations", ctypes.c_uint8)
-    ]
-
-
-LibUsbDeviceDescriptorPtr = ctypes.POINTER(LibUsbDeviceDescriptor)
 
 
 class LibUsbEndpointDescriptor(ctypes.Structure):
@@ -149,6 +126,30 @@ class LibUsbConfigDescriptor(ctypes.Structure):
 LibUsbConfigDescriptorPtr = ctypes.POINTER(LibUsbConfigDescriptor)
 
 
+class LibUsbDeviceDescriptor(ctypes.Structure):
+    """A libusb device descriptor."""
+    _pack_ = C_STRUCT_ALIGNMENT
+    _fields_ = [
+        ("bLength", ctypes.c_uint8),
+        ("bDescriptorType", ctypes.c_uint8),
+        ("bcdUSB", ctypes.c_uint16),
+        ("bDeviceClass", ctypes.c_uint8),
+        ("bDeviceSubClass", ctypes.c_uint8),
+        ("bDeviceProtocol", ctypes.c_uint8),
+        ("bMaxPacketSize0", ctypes.c_uint8),
+        ("idVendor", ctypes.c_uint16),
+        ("idProduct", ctypes.c_uint16),
+        ("bcdDevice", ctypes.c_uint16),
+        ("iManufacturer", ctypes.c_uint8),
+        ("iProduct", ctypes.c_uint8),
+        ("iSerialNumber", ctypes.c_uint8),
+        ("bNumConfigurations", ctypes.c_uint8)
+    ]
+
+
+LibUsbDeviceDescriptorPtr = ctypes.POINTER(LibUsbDeviceDescriptor)
+
+
 class LibUsbError(Exception):
     def __init__(self, error_code: int, error_message: str):
         self.error_code = error_code
@@ -159,7 +160,7 @@ class LibUsbLibrary:
     """This class encapsulates a dynamically loaded libusb instance."""
     def __init__(self, filename: str):
         if sys.platform == "win32":
-            # Assume that the library uses the stdcall convention.
+            # The Windows version of libusb uses the stdcall convention.
             lib = ctypes.WinDLL(filename)
         else:
             lib = ctypes.CDLL(filename)
@@ -209,7 +210,7 @@ class LibUsbLibrary:
         lib.libusb_bulk_transfer.argtypes = [
             LibUsbDeviceHandlePtr, ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte),
             ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_uint]
-        lib.libusb_control_transfer.restype = ctypes.c_int
+        lib.libusb_bulk_transfer.restype = ctypes.c_int
 
         lib.libusb_error_name.argtypes = [ctypes.c_int]
         lib.libusb_error_name.restype = ctypes.c_char_p
@@ -451,7 +452,7 @@ class LibUsbLibrary:
         """Determine if a kernel driver is active on an interface. """
         result = self._lib.libusb_kernel_driver_active(device_handle, interface_number)
         if result == LIBUSB_ERROR_NOT_SUPPORTED:
-            # In OS'es where the "kernel driver active: concept does not exist,
+            # In operating systems where the "kernel driver active" concept does not exist,
             # report False.
             return False
         if result < 0:
