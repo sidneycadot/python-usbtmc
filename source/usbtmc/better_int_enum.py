@@ -1,4 +1,4 @@
-"""This module implements IntEnums with improved printing."""
+"""This module implements IntEnums with improved printing of values."""
 
 from enum import IntEnum
 
