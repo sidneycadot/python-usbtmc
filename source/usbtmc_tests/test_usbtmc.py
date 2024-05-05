@@ -1,6 +1,6 @@
 #! /usr/bin/env -S python3 -B
 
-""""A basic test program for python-usbtmc."""
+"""A basic test program for python-usbtmc."""
 
 import contextlib
 from io import BytesIO
@@ -9,8 +9,27 @@ import sys
 import time
 from typing import Optional
 
-from usbtmc import UsbTmcInterface, UsbTmcError
+from usbtmc import UsbTmcInterface
 from usbtmc.libusb_library import LibUsbError
+
+
+def initialize_libusb_library_path_environment_variable() -> bool:
+    """Initialize the LIBUSB_LIBRARY_PATH environment variable, if needed.
+
+    In Windows, we need to tell usbtmc where the libusb-1.0 DLL can be found. This is done by
+    pointing the LIBUSB_LIBRARY_PATH environment variable to the libusb-1.0 DLL.
+
+    If the LIBUSB_LIBRARY_PATH variable is already set, or on non-Windows platforms, this function is a no-op.
+    """
+
+    if ("LIBUSB_LIBRARY_PATH" in os.environ) or (sys.platform != "win32"):
+        return False
+
+    filename = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../windows/libusb-1.0.dll"))
+    if not os.path.exists(filename):
+        raise RuntimeError("Cannot find the libusb-1.0 library at '{filename}'. Please make sure it's available.")
+    os.environ["LIBUSB_LIBRARY_PATH"] = filename
+    return True
 
 
 def parse_definite_length_binary_block(data: bytes) -> bytes:
@@ -18,20 +37,20 @@ def parse_definite_length_binary_block(data: bytes) -> bytes:
     fi = BytesIO(data)
     header = fi.read(2)
     if len(header) != 2:
-        raise RuntimeError()
+        raise ValueError()
     if not header.startswith(b'#'):
-        raise RuntimeError()
+        raise ValueError()
     num_size_digits = int(header[1:2])
     if len(data) < 2 + num_size_digits:
-        raise RuntimeError()
+        raise ValueError()
     size_digits = fi.read(num_size_digits)
     if len(size_digits) != num_size_digits:
-        raise RuntimeError()
+        raise ValueError()
     size = int(size_digits)
 
     expected_size = 2 + num_size_digits + size
     if len(data) != expected_size:
-        raise RuntimeError()
+        raise ValueError()
 
     block = fi.read(size)
     return block
@@ -102,7 +121,7 @@ def test_max_message_length(usbtmc_interface: UsbTmcInterface, max_request_size:
             break
         best = len(request)
         num_spaces += 1
-    print(f"   Done. Longest total message size that works: {best}.")
+    print(f"   Done. Longest total message size that works as expected: {best}.")
 
 
 def test_multiple_queries(usbtmc_interface: UsbTmcInterface, max_query_count: int) -> None:
@@ -113,8 +132,8 @@ def test_multiple_queries(usbtmc_interface: UsbTmcInterface, max_query_count: in
     while True:
         if query_count > max_query_count:
             break
-        # Make a long input message with 'count'' commands, separated by semicolons.
-        request = ";".join("*STB?" for i in range (query_count))
+        # Make a long input message with 'count' commands, separated by semicolons.
+        request = ";".join(["*STB?"] * query_count)
         try:
             response = usbtmc_query(usbtmc_interface, request)
         except LibUsbError:
@@ -124,7 +143,7 @@ def test_multiple_queries(usbtmc_interface: UsbTmcInterface, max_query_count: in
             break
         best = query_count
         query_count += 1
-    print(f"   Done. Longest total query count that works: {best}.")
+    print(f"   Done. Longest total query count that works as expected: {best}.")
 
 
 def test_status_behavior(usbtmc_interface: UsbTmcInterface) -> None:
@@ -152,11 +171,6 @@ def test_status_behavior(usbtmc_interface: UsbTmcInterface) -> None:
         response = usbtmc_interface.read_message()
         print(f"query: {query:20} response: {response:20}")
 
-    usbtmc_interface.write_message("DATA:VOLATILE:CLEAR")
-    usbtmc_interface.write_message("DATA:ARBITRARY2:FORMAT ABAB")
-    usbtmc_interface.write_message("DATA:ARBITRARY2:FORMAT ABAB")
-    usbtmc_interface.write_message("DATA:ARBITRARY2:DAC awg_test,", make_definite_length_binary_block(data))
-
     for i in range(20):
         stb = usbtmc_interface.read_status_byte()
         print("stb:", stb)
@@ -176,16 +190,7 @@ def test_status_behavior(usbtmc_interface: UsbTmcInterface) -> None:
 def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
     """Run USBTMC tests."""
 
-    if sys.platform == "win32" and "LIBUSB_LIBRARY_PATH" not in os.environ:
-        # In Windows, we need to explain to usbtmc where the libusb-1.0 DLL can be found.
-        # Point to a location relative to where this test's source file can be found.
-
-        filename = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../windows/libusb-1.0.dll"))
-        if not os.path.exists(filename):
-            raise RuntimeError("Cannot find the libusb library.")
-        print("Setting libusb filename to '{}'.".format(filename))
-        os.environ["LIBUSB_LIBRARY_PATH"] = filename
-        del filename
+    initialize_libusb_library_path_environment_variable()
 
     usbtmc_interface = UsbTmcInterface(vid=vid, pid=pid, serial=serial)
     usbtmc_interface.open()
@@ -269,11 +274,7 @@ def main():
     # (vid, pid) = (0xf4ec, 0xee38)    # Siglent SDS 1204X-E
     # (vid, pid) = (0x1313, 0x8078)  # Thorlabs PM100D
 
-    try:
-        run_tests(vid, pid)
-    except (LibUsbError, UsbTmcError) as exception:
-        print("An exception occurred while executing tests:", exception)
-        raise
+    run_tests(vid, pid)
 
 
 if __name__ == "__main__":
