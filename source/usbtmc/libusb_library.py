@@ -376,7 +376,7 @@ class LibUsbLibrary:
         if response[0] != len(response):
             raise LibUsbIOError("Bad response length.")
 
-        if response[1] == LIBUSB_DT_STRING:
+        if response[1] != LIBUSB_DT_STRING:
             raise LibUsbIOError("Bad descriptor type.")
 
         if len(response) % 2 != 0:
