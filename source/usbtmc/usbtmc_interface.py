@@ -7,8 +7,7 @@ import ctypes.util
 
 from .better_int_enum import BetterIntEnum
 from .libusb_library import LibUsbLibrary, LibUsbDeviceHandlePtr, LANGID_ENGLISH_US
-from .usbtmc_interface_behavior import get_usbtmc_interface_behavior
-
+from .usbtmc_interface_behavior import get_usbtmc_interface_behavior, UsbTmcInterfaceBehavior
 
 BULK_TRANSFER_HEADER_SIZE = 12  # All Bulk-In and Bulk-Out transfers have a 12-byte header describing the transfer.
 
@@ -78,20 +77,20 @@ class UsbTmcInterfaceInfo(NamedTuple):
 class UsbTmcInterfaceCapabilities(NamedTuple):
     """USBTMC capabilities as read from the USBTMC interface."""
     # Version number and capabilities defined for the generic USBTMC protocol:
-    usbtmc_version: int
-    usbtmc_indicator_pulse_supported: bool
+    usbtmc_interface_version: tuple[int, int]
+    usbtmc_interface_supports_indicator_pulse: bool
     usbtmc_interface_is_talk_only: bool
     usbtmc_interface_is_listen_only: bool
-    usbtmc_termchar_supported: bool
+    usbtmc_interface_supports_termchar_feature: bool
     # Version number and capabilities defined for the USB488 sub-protocol:
-    usb488_interface_version: int
+    usb488_interface_version: tuple[int, int]
     usb488_interface_is_488v2: bool
     usb488_interface_accepts_remote_local_commands: bool
     usb488_interface_accepts_trigger_command: bool
-    usb488_device_supports_all_mandatory_scpi_commands: bool
-    usb488_device_is_sr1_capable: bool
-    usb488_device_is_rr1_capable: bool
-    usb488_device_is_dt1_capable: bool
+    usb488_interface_supports_all_mandatory_scpi_commands: bool
+    usb488_interface_device_is_sr1_capable: bool
+    usb488_interface_device_is_rl1_capable: bool
+    usb488_interface_device_is_dt1_capable: bool
 
 
 class UsbTmcError(Exception):
@@ -224,7 +223,10 @@ class UsbTmcInterface:
     # All UsbTmcInterface instances will use the same managed instance of libusb and a libusb context.
     _usbtmc_libusb_manager = LibUsbLibraryManager()
 
-    def __init__(self, *, vid: int, pid: int, serial: Optional[str] = None, short_timeout: float = 500.0, min_bulk_speed: float = 500.0):
+    def __init__(self, *, vid: int, pid: int, serial: Optional[str] = None,
+                 behavior: UsbTmcInterfaceBehavior = None,
+                 short_timeout: float = 500.0,
+                 min_bulk_speed: float = 500.0):
 
         self._vid = vid
         self._pid = pid
@@ -232,7 +234,7 @@ class UsbTmcInterface:
         self._short_timeout = round(short_timeout)  # Short timeout, in [ms]. Used for control transfers and short bulk transfers.
         self._min_bulk_speed = min_bulk_speed       # Minimum bulk speed, in [bytes/ms] or, equivalently, [kB/s].
 
-        self._behavior = get_usbtmc_interface_behavior(vid, pid)
+        self._behavior = get_usbtmc_interface_behavior(vid, pid) if behavior is None else behavior
 
         self._libusb = None
         self._device_handle = None
@@ -304,6 +306,10 @@ class UsbTmcInterface:
         self._bulk_out_btag = None
         self._rsb_btag = None
 
+    def get_string_descriptor_languages(self) -> list[int]:
+        """Get supported string descriptor languages."""
+        return self._libusb.get_string_descriptor_languages(self._device_handle, self._short_timeout)
+
     def _control_transfer(self, request: ControlRequest, w_value: int, w_length: int) -> bytes:
         """Perform a control transfer to the USBTMC interface."""
 
@@ -363,7 +369,7 @@ class UsbTmcInterface:
         timeout = self._calculate_bulk_timeout(len(transfer))
         self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, transfer, timeout)
 
-    def _get_string_descriptor(self, descriptor_index: int, langid: int = LANGID_ENGLISH_US) -> str:
+    def get_string_descriptor(self, descriptor_index: int, langid: int = LANGID_ENGLISH_US) -> str:
         """Get string descriptor from device."""
 
         return self._libusb.get_string_descriptor(self._device_handle, descriptor_index, self._short_timeout, langid)
@@ -378,11 +384,15 @@ class UsbTmcInterface:
         device_descriptor = libusb.get_device_descriptor(device)
 
         vid_pid = "{:04x}:{:04x}".format(device_descriptor.idVendor, device_descriptor.idProduct)
-        manufacturer = self._get_string_descriptor(device_descriptor.iManufacturer, langid=langid)
-        product = self._get_string_descriptor(device_descriptor.iProduct, langid=langid)
-        serial_number = self._get_string_descriptor(device_descriptor.iSerialNumber, langid=langid)
+        manufacturer = self.get_string_descriptor(device_descriptor.iManufacturer, langid=langid)
+        product = self.get_string_descriptor(device_descriptor.iProduct, langid=langid)
+        serial_number = self.get_string_descriptor(device_descriptor.iSerialNumber, langid=langid)
 
         return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
+
+    def get_usbtmc_interface_info(self) -> UsbTmcInterfaceInfo:
+        """Get USBTMC interface info."""
+        return self._usbtmc_info
 
     def write_message(self, *args: (str | bytes), encoding: str = 'ascii'):
         """Write USBTMC message to the BULK-OUT endpoint."""
@@ -610,19 +620,19 @@ class UsbTmcInterface:
             raise UsbTmcControlResponseError(ControlRequest.USBTMC_GET_CAPABILITIES, ControlStatus(response[0]))
 
         capabilities = UsbTmcInterfaceCapabilities(
-            usbtmc_version                                     = response[4] + response[5] * 0x100,
-            usbtmc_indicator_pulse_supported                   = ((response[4] >> 2) & 1) != 0,
-            usbtmc_interface_is_talk_only                      = ((response[4] >> 1) & 1) != 0,
-            usbtmc_interface_is_listen_only                    = ((response[4] >> 0) & 1) != 0,
-            usbtmc_termchar_supported                          = ((response[5] >> 0) & 1) != 0,
-            usb488_interface_version                           = response[12] + response[13] * 0x100,
-            usb488_interface_is_488v2                          = ((response[14] >> 2) & 1) != 0,
-            usb488_interface_accepts_remote_local_commands     = ((response[14] >> 1) & 1) != 0,
-            usb488_interface_accepts_trigger_command           = ((response[14] >> 0) & 1) != 0,
-            usb488_device_supports_all_mandatory_scpi_commands = ((response[15] >> 3) & 1) != 0,
-            usb488_device_is_sr1_capable                       = ((response[15] >> 2) & 1) != 0,
-            usb488_device_is_rr1_capable                       = ((response[15] >> 1) & 1) != 0,
-            usb488_device_is_dt1_capable                       = ((response[15] >> 0) & 1) != 0
+            usbtmc_interface_version                              = (response[5], response[4]),
+            usbtmc_interface_supports_indicator_pulse             = ((response[4] >> 2) & 1) != 0,
+            usbtmc_interface_is_talk_only                         = ((response[4] >> 1) & 1) != 0,
+            usbtmc_interface_is_listen_only                       = ((response[4] >> 0) & 1) != 0,
+            usbtmc_interface_supports_termchar_feature            = ((response[5] >> 0) & 1) != 0,
+            usb488_interface_version                              = (response[13], response[12]),
+            usb488_interface_is_488v2                             = ((response[14] >> 2) & 1) != 0,
+            usb488_interface_accepts_remote_local_commands        = ((response[14] >> 1) & 1) != 0,
+            usb488_interface_accepts_trigger_command              = ((response[14] >> 0) & 1) != 0,
+            usb488_interface_supports_all_mandatory_scpi_commands = ((response[15] >> 3) & 1) != 0,
+            usb488_interface_device_is_sr1_capable                = ((response[15] >> 2) & 1) != 0,
+            usb488_interface_device_is_rl1_capable                = ((response[15] >> 1) & 1) != 0,
+            usb488_interface_device_is_dt1_capable                = ((response[15] >> 0) & 1) != 0
         )
 
         return capabilities
