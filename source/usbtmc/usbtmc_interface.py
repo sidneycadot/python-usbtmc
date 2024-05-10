@@ -383,7 +383,7 @@ class UsbTmcInterface:
 
         device_descriptor = libusb.get_device_descriptor(device)
 
-        vid_pid = "{:04x}:{:04x}".format(device_descriptor.idVendor, device_descriptor.idProduct)
+        vid_pid = f"{device_descriptor.idVendor:04x}:{device_descriptor.idProduct:04x}"
         manufacturer = self.get_string_descriptor(device_descriptor.iManufacturer, langid=langid)
         product = self.get_string_descriptor(device_descriptor.iProduct, langid=langid)
         serial_number = self.get_string_descriptor(device_descriptor.iSerialNumber, langid=langid)
@@ -584,13 +584,14 @@ class UsbTmcInterface:
 
         while True:
             response = self._control_transfer(ControlRequest.USBTMC_CHECK_CLEAR_STATUS, 0x0000, 2)
+
             if response[0] == ControlStatus.USBTMC_SUCCESS:
                 break
 
-            elif response[0] == ControlStatus.USBTMC_PENDING:
+            if response[0] == ControlStatus.USBTMC_PENDING:
                 if (response[1] & 0x01) != 0:
-                    # If bmClear.D0 = 1, the Host should read from the Bulk-IN endpoint until a short packet is
-                    # received. The Host must send CHECK_CLEAR_STATUS at a later time.
+                    # If bmClear.D0 = 1, the Host should read from the Bulk-IN endpoint until a short
+                    # packet is received. The Host must send CHECK_CLEAR_STATUS at a later time.
                     max_dummy_size = self._usbtmc_info.bulk_in_endpoint_max_packet_size
                     while True:
                         dummy_transfer = self._bulk_transfer_in(max_dummy_size)
