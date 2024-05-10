@@ -205,6 +205,10 @@ def find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHand
                                 bulk_out_endpoint = endpoint_address
                                 bulk_out_endpoint_max_packet_size = endpoint_max_packet_size
 
+                    ok = (bulk_in_endpoint is not None) 
+                    if not ok:
+                        continue
+
                     return UsbTmcInterfaceInfo(
                         altsetting.bInterfaceNumber,
                         altsetting.bInterfaceProtocol,
@@ -224,7 +228,7 @@ class UsbTmcInterface:
     _usbtmc_libusb_manager = LibUsbLibraryManager()
 
     def __init__(self, *, vid: int, pid: int, serial: Optional[str] = None,
-                 behavior: UsbTmcInterfaceBehavior = None,
+                 behavior: Optional[UsbTmcInterfaceBehavior] = None,
                  short_timeout: float = 500.0,
                  min_bulk_speed: float = 500.0):
 
@@ -239,8 +243,8 @@ class UsbTmcInterface:
         self._libusb = None
         self._device_handle = None
         self._usbtmc_info = None
-        self._bulk_out_btag = None
-        self._rsb_btag = None
+        self._bulk_out_btag: Optional[int] = None
+        self._rsb_btag: Optional[int] = None
 
     def open(self) -> None:
         """Find and open the device.
@@ -263,6 +267,8 @@ class UsbTmcInterface:
         if usbtmc_info is None:
             libusb.close(device_handle)
             raise UsbTmcGenericError("The device doesn't have a USBTMC interface.")
+
+        assert usbtmc_info is not None
 
         # Declare the device open, but prepare to close it when a subsequent initialization operation fails.
 
@@ -308,10 +314,17 @@ class UsbTmcInterface:
 
     def get_string_descriptor_languages(self) -> list[int]:
         """Get supported string descriptor languages."""
+        
+        if self._device_handle is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
         return self._libusb.get_string_descriptor_languages(self._device_handle, self._short_timeout)
 
     def _control_transfer(self, request: ControlRequest, w_value: int, w_length: int) -> bytes:
         """Perform a control transfer to the USBTMC interface."""
+
+        if self._libusb is None:
+            raise UsbTmcGenericError("The interface is not open.")
 
         response = self._libusb.control_transfer(
             self._device_handle,
@@ -332,6 +345,10 @@ class UsbTmcInterface:
         The Host should increment the bTag by 1 each time it sends a new Bulk-OUT Header.
         The Host must set bTag such that 1 <= bTag <= 255.
         """
+
+        if self._bulk_out_btag is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
         self._bulk_out_btag = self._bulk_out_btag % 255 + 1
         return self._bulk_out_btag
 
@@ -343,15 +360,27 @@ class UsbTmcInterface:
         The Host should increment the bTag by 1 for each new READ_STATUS_BYTE request to help identify when the
         response arrives at the Interrupt-IN endpoint.
         """
+
+        if self._rsb_btag is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
         self._rsb_btag = (self._rsb_btag - 1) % 126 + 2
         return self._rsb_btag
 
     def _claim_interface(self) -> None:
         """Let the operating system know that we want to have exclusive access to the interface."""
+
+        if self._libusb is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
         self._libusb.claim_interface(self._device_handle, self._usbtmc_info.interface_number)
 
     def _release_interface(self) -> None:
         """Let the operating system know that we want to drop exclusive access to the interface."""
+
+        if self._libusb is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
         self._libusb.release_interface(self._device_handle, self._usbtmc_info.interface_number)
 
     def _calculate_bulk_timeout(self, num_octets: int) -> int:
@@ -360,17 +389,27 @@ class UsbTmcInterface:
 
     def _bulk_transfer_in(self, max_size: int) -> bytes:
         """Perform a single BULK-IN transfer."""
+
+        if self._libusb is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
         timeout = self._calculate_bulk_timeout(max_size)
         return self._libusb.bulk_transfer_in(self._device_handle, self._usbtmc_info.bulk_in_endpoint, max_size, timeout)
 
     def _bulk_transfer_out(self, transfer: bytes) -> None:
         """Perform a single BULK-OUT transfer."""
 
+        if self._libusb is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
         timeout = self._calculate_bulk_timeout(len(transfer))
         self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, transfer, timeout)
 
     def get_string_descriptor(self, descriptor_index: int, langid: int = LANGID_ENGLISH_US) -> str:
         """Get string descriptor from device."""
+
+        if self._libusb is None:
+            raise UsbTmcGenericError("The interface is not open.")
 
         return self._libusb.get_string_descriptor(self._device_handle, descriptor_index, self._short_timeout, langid)
 
@@ -390,7 +429,7 @@ class UsbTmcInterface:
 
         return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
 
-    def get_usbtmc_interface_info(self) -> UsbTmcInterfaceInfo:
+    def get_usbtmc_interface_info(self) -> Optional[UsbTmcInterfaceInfo]:
         """Get USBTMC interface info."""
         return self._usbtmc_info
 
@@ -432,6 +471,9 @@ class UsbTmcInterface:
 
     def read_binary_message(self, *, remove_trailing_newline: bool = True) -> bytes:
         """Read a complete USBTMC message from the USBTMC interface's BULK-IN endpoint as a 'bytes' instance."""
+
+        if self._usbtmc_info is None:
+            raise UsbTmcGenericError("The interface is not open.")
 
         # We will collect the data from the separate transfers in the usbtmc_message buffer.
         message = bytearray()
@@ -549,7 +591,7 @@ class UsbTmcInterface:
 
         return message.decode(encoding)
 
-    def trigger(self):
+    def trigger(self) -> None:
         """Send trigger request to device.
 
         The trigger request is sent by the Host via the BULK-OUT endpoint.
@@ -569,6 +611,9 @@ class UsbTmcInterface:
 
         The command sequence is described in 4.2.1.6 and 4.2.1.7 of the USBTMC specification.
         """
+
+        if self._usbtmc_info is None:
+            raise UsbTmcGenericError("The interface is not open.")
 
         if self._behavior.clear_usbtmc_interface_disabled:
             return
