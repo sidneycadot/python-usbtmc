@@ -1,15 +1,16 @@
 #! /usr/bin/env python3
 
-"""This tool is a conformance tester of devices that claim to support USBTMC."""
+"""This is a conformance testing tool for devices that claim to support USBTMC."""
 
 import os
 import sys
 import re
 import argparse
 from contextlib import closing
+from enum import Enum
 
 from usbtmc import UsbTmcInterface
-from usbtmc.libusb_library import LibUsbLibraryError
+from usbtmc.libusb_library import LibUsbLibraryFunctionCallError
 from usbtmc.usbtmc_interface_behavior import UsbTmcInterfaceBehavior
 
 languages = {
@@ -151,29 +152,93 @@ def initialize_libusb_library_path_environment_variable() -> bool:
     return True
 
 
+def conformance_test_indicator_pulse(usbtmc_interface: UsbTmcInterface, is_capability: bool) -> None:
+
+    print()
+    print("Conformity test: indicator pulse")
+    print("================================")
+    print()
+
+    print("USBTMC devices may support INDICATOR PULSE requests. Such a request asks the device to")
+    print("show a blinking light (or something similar), to help the user to identify the correct")
+    print("device in a lab setting.")
+    print()
+
+    if is_capability:
+        print("The device claims that it handles indicator pulse requests.")
+    else:
+        print("The device claims that it DOES NOT handle indicator pulse requests.")
+
+    print()
+    print("We will now check the actual behavior of the device when an indicator pulse request")
+    print("is sent. To do this, you are prompted to press Enter. Each time you press enter,")
+    print("an indicator request is sent. This loop stops when you type 'q', followed by enter.")
+    print()
+
+    class ObservedBehavior(Enum):
+        REQUEST_REJECTED = 101
+        REQUEST_ACCEPTED_INDICATOR_PRESENT = 102
+        REQUEST_ACCEPTED_INDICATOR_NOT_PRESENT = 103
+
+    input("Press enter to send the request ... ").lower()
+    while True:
+        print("Requesting indicator pulse ...")
+        # The following line raises an exception if the device indicates it does not support the
+        # request.
+        try:
+            usbtmc_interface.indicator_pulse()
+        except Exception as exception:
+            # Note: the Siglent raises a LibUsbFunctionCallError: LIBUSB_ERROR_PIPE here.
+            print("The device refused the request:", exception)
+            behavior = ObservedBehavior.REQUEST_REJECTED  # Request was rejected.
+            break
+
+        print("The device acknowledged request.")
+
+        user_input = input("Type 'y' if you see the indicator, 'n' if you don't see it, or just Enter to retry.").lower()
+        if user_input in ("y", "yes"):
+            behavior = ObservedBehavior.REQUEST_ACCEPTED_INDICATOR_PRESENT
+            break
+
+        if user_input in ("n", "no"):
+            behavior = ObservedBehavior.REQUEST_ACCEPTED_INDICATOR_NOT_PRESENT
+            break
+
+    match (is_capability, behavior):
+        case (True, ObservedBehavior.REQUEST_REJECTED):
+            print("NON-CONFORMANT BEHAVIOR: device claims it can do it, but rejects the request. The request should be accepted.")
+        case (True, ObservedBehavior.REQUEST_ACCEPTED_INDICATOR_PRESENT):
+            print("CONFORMANT BEHAVIOR: device claims it can do it, accepted the request, and an indicator pulse is seen.")
+        case (True, ObservedBehavior.REQUEST_ACCEPTED_INDICATOR_NOT_PRESENT):
+            print("NON-CONFORMANT BEHAVIOR: device claims it can do it, accepted the pulse, but no pulse seen. The device should shown a visible pulse indicator.")
+        case (False, ObservedBehavior.REQUEST_REJECTED):
+            print("CONFORMANT BEHAVIOR: device claims it cannot do it and rejected the request.")
+        case (False, ObservedBehavior.REQUEST_ACCEPTED_INDICATOR_PRESENT):
+            print("NON-CONFORMANT BEHAVIOR: device claims it cannot do it but accepted the request and shows an indicator. The capability should be 'indicator pulse supported'.")
+        case (False, ObservedBehavior.REQUEST_ACCEPTED_INDICATOR_NOT_PRESENT):
+            print("NON-CONFORMANT BEHAVIOR: device claims it cannot do it but then accepted the request, showing no indicator. The request should have been rejected.")
+
+
+def conformance_test_scpi(usbtmc_interface: UsbTmcInterface) -> None:
+
+    print()
+    print("Conformity test: SCPI")
+    print("=====================")
+    print()
+
+    usbtmc_interface.write_message("*IDN?\n")
+    response = usbtmc_interface.read_message()
+
+    print(f"Response: {response!r}")
+
+
 def yesno(flag: bool) -> str:
     return "yes" if flag else "no"
 
 
-def main():
+def test_device(vid: int, pid: int) -> None:
 
-    vid_pid_pattern = re.compile("([0-9a-fA-F]{4}):([0-9a-fA-F]{4})")
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("vid_pid")
-
-    args = parser.parse_args()
-
-    match = vid_pid_pattern.match(args.vid_pid)
-    if match is None:
-        print("Bad vid:pid specified.")
-        return
-
-    vid = int(match.group(1), 16)
-    pid = int(match.group(2), 16)
-
-    initialize_libusb_library_path_environment_variable()
-
+    #behavior = None
     behavior = UsbTmcInterfaceBehavior(
         open_reset_method=0
     )
@@ -243,7 +308,7 @@ def main():
             for descriptor_index in range(1, 256):
                 try:
                     descriptor_string = usbtmc_interface.get_string_descriptor(descriptor_index)
-                except LibUsbLibraryError:
+                except LibUsbLibraryFunctionCallError:
                     descriptor_string = None
 
                 if descriptor_string is not None:
@@ -270,6 +335,36 @@ def main():
         print(f"usb488 interface is SR1 capable ............................ : {yesno(capabilities.usb488_interface_device_is_sr1_capable)}")
         print(f"usb488 interface is RL1 capable ............................ : {yesno(capabilities.usb488_interface_device_is_rl1_capable)}")
         print(f"usb488 interface is DT1 capable ............................ : {yesno(capabilities.usb488_interface_device_is_dt1_capable)}")
+
+        conformance_test_indicator_pulse(usbtmc_interface, capabilities.usbtmc_interface_supports_indicator_pulse)
+
+        conformance_test_scpi(usbtmc_interface)
+
+
+def main():
+
+    device_vid_pid_pattern = re.compile("([0-9a-fA-F]{4}):([0-9a-fA-F]{4})")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("devices", nargs="+")
+
+    args = parser.parse_args()
+
+    initialize_libusb_library_path_environment_variable()
+
+    for device in args.devices:
+
+        match = device_vid_pid_pattern.match(device)
+        if match is None:
+            print(f"Skipping bad device: {device!r}.")
+            continue
+
+        vid = int(match.group(1), 16)
+        pid = int(match.group(2), 16)
+
+        test_device(vid, pid)
+
+        break  # TODO: Remove. With this break present, we only test the first device.
 
 
 if __name__ == "__main__":

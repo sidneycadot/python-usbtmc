@@ -23,6 +23,7 @@ class UsbTmcInterfaceBehavior(NamedTuple):
     usbtmc_clear_sequence_resets_bulk_in: bool = False
     clear_usbtmc_interface_disabled: bool = False
     remove_bulk_padding_bytes: bool = False
+    strip_trailing_string_nul_characters: bool = False
 
 
 def get_usbtmc_interface_behavior(vid: int, pid: int) -> UsbTmcInterfaceBehavior:
@@ -37,6 +38,10 @@ def get_usbtmc_interface_behavior(vid: int, pid: int) -> UsbTmcInterfaceBehavior
                 open_reset_method=0,
                 clear_usbtmc_interface_disabled=True,
                 remove_bulk_padding_bytes=True
+            )
+        case (0x1ab1, 0x0588):  # Rigol DS1102D oscilloscope.
+            return UsbTmcInterfaceBehavior(
+                strip_trailing_string_nul_characters=True
             )
         case _:  # Nominal USBTMC interface behavior.
             return UsbTmcInterfaceBehavior()

@@ -312,14 +312,6 @@ class UsbTmcInterface:
         self._bulk_out_btag = None
         self._rsb_btag = None
 
-    def get_string_descriptor_languages(self) -> list[int]:
-        """Get supported string descriptor languages."""
-        
-        if self._device_handle is None:
-            raise UsbTmcGenericError("The interface is not open.")
-
-        return self._libusb.get_string_descriptor_languages(self._device_handle, self._short_timeout)
-
     def _control_transfer(self, request: ControlRequest, w_value: int, w_length: int) -> bytes:
         """Perform a control transfer to the USBTMC interface."""
 
@@ -405,13 +397,27 @@ class UsbTmcInterface:
         timeout = self._calculate_bulk_timeout(len(transfer))
         self._libusb.bulk_transfer_out(self._device_handle, self._usbtmc_info.bulk_out_endpoint, transfer, timeout)
 
+    def get_string_descriptor_languages(self) -> list[int]:
+        """Get supported string descriptor languages."""
+
+        if self._device_handle is None:
+            raise UsbTmcGenericError("The interface is not open.")
+
+        return self._libusb.get_string_descriptor_languages(self._device_handle, self._short_timeout)
+
     def get_string_descriptor(self, descriptor_index: int, langid: int = LANGID_ENGLISH_US) -> str:
         """Get string descriptor from device."""
 
         if self._libusb is None:
             raise UsbTmcGenericError("The interface is not open.")
 
-        return self._libusb.get_string_descriptor(self._device_handle, descriptor_index, self._short_timeout, langid)
+        response = self._libusb.get_string_descriptor(self._device_handle, descriptor_index, self._short_timeout, langid)
+
+        if self._behavior.strip_trailing_string_nul_characters:
+            while response.endswith("\x00"):
+                response = response[:-1]
+
+        return response
 
     def get_device_info(self, *, langid: int = LANGID_ENGLISH_US) -> UsbDeviceInfo:
         """Convenience method for getting human-readable information on the currently open USBTMC device."""

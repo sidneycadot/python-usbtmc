@@ -16,7 +16,7 @@ LIBUSB_REQUEST_GET_DESCRIPTOR = 0x06
 
 LIBUSB_DT_STRING = 0x03
 
-# The value 8 works on 64-bit Microsoft Windows.
+# Alignment for structs used by libusb. The value 8 works on 64-bit Microsoft Windows.
 C_STRUCT_ALIGNMENT = 8
 
 LANGID_ENGLISH_US = 0x0409  # USBTMC devices are required to support at least this language for string descriptors.
@@ -150,24 +150,28 @@ class LibUsbDeviceDescriptor(ctypes.Structure):
 LibUsbDeviceDescriptorPtr = ctypes.POINTER(LibUsbDeviceDescriptor)
 
 
-class LibUsbError(Exception):
+class LibUsbLibraryError(Exception):
     """Base class for errors reported by the LibUsbLibrary methods."""
 
 
-class LibUsbIOError(LibUsbError):
-    pass
-
-
-class LibUsbLibraryError(LibUsbError):
+class LibUsbLibraryFunctionCallError(LibUsbLibraryError):
     """An error was reported by a libusb function."""
     def __init__(self, error_code: int, error_message: str):
         self.error_code = error_code
         self.error_message = error_message
 
 
+class LibUsbLibraryMiscellaneousError(LibUsbLibraryError):
+    """Any error in a LibUsbLibrary method that is not reported by a function call the libusb library."""
+    def __init__(self, message: str):
+        self.message = message
+
+
 class LibUsbLibrary:
     """This class encapsulates a dynamically loaded libusb instance."""
+
     def __init__(self, filename: str):
+
         if sys.platform == "win32":
             # The Windows version of libusb uses the 'stdcall' calling convention.
             lib = ctypes.WinDLL(filename)
@@ -254,10 +258,10 @@ class LibUsbLibrary:
         lib.libusb_set_auto_detach_kernel_driver.argtypes = [LibUsbDeviceHandlePtr, ctypes.c_int]
         lib.libusb_set_auto_detach_kernel_driver.restype = ctypes.c_int
 
-    def _libusb_exception(self, error_code: int) -> LibUsbLibraryError:
+    def _libusb_exception(self, error_code: int) -> LibUsbLibraryFunctionCallError:
         """Look up the description of the error and return a LibUsbError exception."""
         error_message = self.get_error_name(error_code)
-        return LibUsbLibraryError(error_code, error_message)
+        return LibUsbLibraryFunctionCallError(error_code, error_message)
 
     def init(self) -> LibUsbContextPtr:
         """Initialize a libusb context."""
@@ -337,7 +341,7 @@ class LibUsbLibrary:
             raise self._libusb_exception(result)
 
         if transferred.value != len(data):
-            raise LibUsbIOError("Expected the value of transferred to be equal to the number of bytes received.")
+            raise LibUsbLibraryMiscellaneousError("Expected the value of transferred to be equal to the number of bytes received.")
 
     def bulk_transfer_in(self, device_handle: LibUsbDeviceHandlePtr, endpoint: int, maxsize: int, timeout: int) -> bytes:
         """Execute a bulk-in transfer."""
@@ -371,16 +375,16 @@ class LibUsbLibrary:
         )
 
         if len(response) < 2:
-            raise LibUsbIOError("Response too short.")
+            raise LibUsbLibraryMiscellaneousError("Response too short.")
 
         if response[0] != len(response):
-            raise LibUsbIOError("Bad response length.")
+            raise LibUsbLibraryMiscellaneousError("Bad response length.")
 
         if response[1] != LIBUSB_DT_STRING:
-            raise LibUsbIOError("Bad descriptor type.")
+            raise LibUsbLibraryMiscellaneousError("Bad descriptor type.")
 
         if len(response) % 2 != 0:
-            raise LibUsbIOError("Response length not even.")
+            raise LibUsbLibraryMiscellaneousError("Response length not even.")
 
         num_languages = (len(response) - 2) // 2
 
@@ -408,10 +412,10 @@ class LibUsbLibrary:
         )
 
         if response[0] != len(response):
-            raise LibUsbIOError("Expected first byte to be equal to the length of the response.")
+            raise LibUsbLibraryMiscellaneousError("Expected first byte to be equal to the length of the response.")
 
         if response[1] != LIBUSB_DT_STRING:
-            raise LibUsbIOError("Expected string descriptor.")
+            raise LibUsbLibraryMiscellaneousError("Expected string descriptor.")
 
         return response[2:].decode('utf_16_le')
 
@@ -543,13 +547,15 @@ class LibUsbLibrary:
 
             device_descriptor = self.get_device_descriptor(device)
 
+            # print(f"Located device:  {device_descriptor.idVendor:04x}:{device_descriptor.idProduct:04x}")
+
             if (device_descriptor.idVendor != vid) or (device_descriptor.idProduct != pid):
                 # VID or PID mismatch -- reject.
                 continue
 
             try:
                 device_handle = self.open(device)
-            except LibUsbLibraryError:
+            except LibUsbLibraryFunctionCallError:
                 # Cannot open the device -- reject.
                 continue
 
@@ -565,7 +571,7 @@ class LibUsbLibrary:
 
             try:
                 serial_from_device = self.get_string_descriptor(device_handle, device_descriptor.iSerialNumber, timeout, langid)
-            except LibUsbLibraryError:
+            except LibUsbLibraryFunctionCallError:
                 # Error while retrieving the serial number. Close device, reject.
                 self.close(device_handle)
                 device_handle = None
@@ -578,7 +584,7 @@ class LibUsbLibrary:
                 continue
 
         # Discard the list of devices and decrement their reference counts.
-        # This will bring all reference counts to zero, except of the currently opened device (if any).
+        # This will bring all reference counts to zero, except for the currently opened device (if any).
         self._lib.libusb_free_device_list(device_list, 1)
 
         return device_handle
