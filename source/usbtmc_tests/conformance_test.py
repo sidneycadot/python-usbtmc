@@ -147,7 +147,7 @@ def initialize_libusb_library_path_environment_variable() -> bool:
 
     filename = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../windows/libusb-1.0.dll"))
     if not os.path.exists(filename):
-        raise RuntimeError("Cannot find the libusb-1.0 library at '{filename}'. Please make sure it's available.")
+        raise RuntimeError(f"Cannot find the libusb-1.0 library at '{filename}'. Please make sure it's available.")
     os.environ["LIBUSB_LIBRARY_PATH"] = filename
     return True
 
