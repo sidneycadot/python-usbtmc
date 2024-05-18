@@ -155,7 +155,7 @@ class LibUsbLibraryManager:
         return self._ctx
 
 
-def find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHandlePtr) -> Optional[UsbTmcInterfaceInfo]:
+def _find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHandlePtr) -> Optional[UsbTmcInterfaceInfo]:
     """Find the USBTMC interface of a given USB device."""
 
     device = libusb.get_device(device_handle)
@@ -221,6 +221,17 @@ def find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHand
     return None  # No USBTMC interface was found.
 
 
+def _from_bcd(octet: int) -> int:
+    # Interpret an octet as a BCD number.
+    hi = octet // 16
+    lo = octet % 16
+    ok = (0 <= hi <= 9) and (0 <= lo <= 9)
+    if not ok:
+        raise ValueError(f"Bad BCD octet value: 0x{octet:04x}")
+
+    return hi * 10 + lo
+
+
 class UsbTmcInterface:
     """This class represents the USBTMC interface of a specific USB device."""
 
@@ -263,7 +274,7 @@ class UsbTmcInterface:
         # We found the device and opened it. See if it provides a USBTMC interface.
         # If not, we close the device handle and raise an exception.
 
-        usbtmc_info = find_usbtmc_interface(libusb, device_handle)
+        usbtmc_info = _find_usbtmc_interface(libusb, device_handle)
         if usbtmc_info is None:
             libusb.close(device_handle)
             raise UsbTmcGenericError("The device doesn't have a USBTMC interface.")
@@ -672,12 +683,12 @@ class UsbTmcInterface:
             raise UsbTmcControlResponseError(ControlRequest.USBTMC_GET_CAPABILITIES, ControlStatus(response[0]))
 
         capabilities = UsbTmcInterfaceCapabilities(
-            usbtmc_interface_version                              = (response[5], response[4]),
+            usbtmc_interface_version                              = (_from_bcd(response[5]), _from_bcd(response[4])),
             usbtmc_interface_supports_indicator_pulse             = ((response[4] >> 2) & 1) != 0,
             usbtmc_interface_is_talk_only                         = ((response[4] >> 1) & 1) != 0,
             usbtmc_interface_is_listen_only                       = ((response[4] >> 0) & 1) != 0,
             usbtmc_interface_supports_termchar_feature            = ((response[5] >> 0) & 1) != 0,
-            usb488_interface_version                              = (response[13], response[12]),
+            usb488_interface_version                              = (_from_bcd(response[13]), _from_bcd(response[12])),
             usb488_interface_is_488v2                             = ((response[14] >> 2) & 1) != 0,
             usb488_interface_accepts_remote_local_commands        = ((response[14] >> 1) & 1) != 0,
             usb488_interface_accepts_trigger_command              = ((response[14] >> 0) & 1) != 0,
