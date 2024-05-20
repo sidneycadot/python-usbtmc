@@ -14,7 +14,7 @@ BULK_TRANSFER_HEADER_SIZE = 12  # All Bulk-In and Bulk-Out transfers have a 12-b
 
 class ControlRequest(BetterIntEnum):
     """Control-out endpoint requests of the USBTMC protocol and the USB488 sub-protocol."""
-    # Values defined for the generic USBTMC protocol:
+    # Values defined for the USBTMC protocol:
     USBTMC_INITIATE_ABORT_BULK_OUT     = 1
     USBTMC_CHECK_ABORT_BULK_OUT_STATUS = 2
     USBTMC_INITIATE_ABORT_BULK_IN      = 3
@@ -32,36 +32,36 @@ class ControlRequest(BetterIntEnum):
 
 class ControlStatus(BetterIntEnum):
     """Control-in endpoint status of the USBTMC protocol and the USB488 sub-protocol."""
-    # Values defined for the generic USBTMC protocol:
+    # Values defined for the USBTMC protocol:
     USBTMC_SUCCESS                  = 0x01
     USBTMC_PENDING                  = 0x02
     USBTMC_FAILED                   = 0x80
     USBTMC_TRANSFER_NOT_IN_PROGRESS = 0x81
     USBTMC_SPLIT_NOT_IN_PROGRESS    = 0x82
     USBTMC_SPLIT_IN_PROGRESS        = 0x83
-    #  Values defined for the USB488 sub-protocol:
+    # Values defined for the USB488 sub-protocol:
     USB488_INTERRUPT_IN_BUSY        = 0x20
 
 
 class BulkMessageID(BetterIntEnum):
     """Bulk-in and bulk-out endpoint message IDs of the USBTMC protocol and the USB488 sub-protocol."""
-    # Values defined for the generic USBTMC protocol:
+    # Values defined for the USBTMC protocol:
     USBTMC_DEV_DEP_MSG_OUT            = 1
     USBTMC_REQUEST_DEV_DEP_MSG_IN     = 2
     USBTMC_DEV_DEP_MSG_IN             = 2
     USBTMC_VENDOR_SPECIFIC_OUT        = 126
     USBTMC_REQUEST_VENDOR_SPECIFIC_IN = 127
     USBTMC_VENDOR_SPECIFIC_IN         = 127
-    #  Values defined for the USB488 sub-protocol:
-    USBTMC_TRIGGER                    = 128
+    # Values defined for the USB488 sub-protocol:
+    USB488_TRIGGER                    = 128
 
 
 class UsbDeviceInfo(NamedTuple):
     """USB device info as human-readable strings."""
-    vid_pid: str
-    manufacturer: str
-    product: str
-    serial_number: Optional[str]  # May be absent.
+    vid_pid: str                  # vid:pid in xxxx:yyyy format, with xxxx and yyyy four-digit hexadecimal values.
+    manufacturer: str             # Manufacturer name as read from the device descriptor.
+    product: str                  # Product name as read from the device descriptor.
+    serial_number: Optional[str]  # Serial number string as read from the device descriptor. May be absent.
 
 
 class UsbTmcInterfaceInfo(NamedTuple):
@@ -431,7 +431,7 @@ class UsbTmcInterface:
         return response
 
     def get_device_info(self, *, langid: int = LANGID_ENGLISH_US) -> UsbDeviceInfo:
-        """Convenience method for getting human-readable information on the currently open USBTMC device."""
+        """Convenience method for getting human-readable information about the currently open USBTMC device."""
         libusb = UsbTmcInterface._usbtmc_libusb_manager.get_libusb()
         device_handle = self._device_handle
 
@@ -447,7 +447,7 @@ class UsbTmcInterface:
         return UsbDeviceInfo(vid_pid, manufacturer, product, serial_number)
 
     def get_usbtmc_interface_info(self) -> Optional[UsbTmcInterfaceInfo]:
-        """Get USBTMC interface info."""
+        """Get the USBTMC interface info as read when the device was opened."""
         return self._usbtmc_info
 
     def write_message(self, *args: (str | bytes), encoding: str = 'ascii'):
@@ -619,7 +619,7 @@ class UsbTmcInterface:
 
         btag = self._get_next_bulk_out_btag()
 
-        message = struct.pack("<BBB9x", BulkMessageID.USBTMC_TRIGGER, btag, btag ^ 0xff)
+        message = struct.pack("<BBB9x", BulkMessageID.USB488_TRIGGER, btag, btag ^ 0xff)
 
         self._bulk_transfer_out(message)
 
