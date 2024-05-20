@@ -1,6 +1,6 @@
 #! /usr/bin/env -S python3 -B
 
-"""Communicate with the Uni-Trend URG962E function / arbitrary waveform generator."""
+"""Communicate with the Thorlabs PM100D powermeter."""
 
 import contextlib
 import time
@@ -11,41 +11,29 @@ from usbtmc import UsbTmcInterface
 from usbtmc_tests.devices.utilities import initialize_libusb_library_path_environment_variable, usbtmc_query
 
 
-def fix_screenshot_data(image_data: bytes) -> bytes:
-    """Fix screenshot image as returned by the DISPLAY:DATA? command."""
-
-    expected_image_data_size = 1 + 14 + 40 + 272 * 480 * 3
-
-    if len(image_data) != expected_image_data_size:
-        raise ValueError("Bad image data.")
-
-    # Turn data into a bytearray, discarding the first stray byte, the value of which is non-deterministic.
-    image_data = bytearray(image_data[1:])
-
-    # An (almost) BMP format image remains. Fix it.
-
-    # Fix file length (the BMP header is not included in the value of the length field, so its value is too low by 14 bytes).
-    struct.pack_into("<L", image_data, 2, len(image_data))
-
-    # Mirror image horizontally and rearrange pixel color ordering: (B/R/G) -> (B/G/R).
-    for y in range(272):
-        for x in range(240):
-            offset1 = 54 + 3 * (y * 480 + x)
-            offset2 = 54 + 3 * (y * 480 + (479 - x))
-
-            (b1, r1, g1) = struct.unpack_from("BBB", image_data, offset1)
-            (b2, r2, g2) = struct.unpack_from("BBB", image_data, offset2)
-
-            struct.pack_into("BBB", image_data, offset1, b2, g2, r2)
-            struct.pack_into("BBB", image_data, offset2, b1, g1, r1)
-
-    # We now have a valid BMP file.
-    return bytes(image_data)
-
-
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
+    """Test *IDN? command."""
     response = usbtmc_query(usbtmc_interface, "*IDN?")
     print(f"Device identifies as follows: {response}")
+
+
+def check_status(usbtmc_interface: UsbTmcInterface) -> None:
+    """Test several device query commands."""
+    commands = [
+        ":SYSTEM:LFREQUENCY?",
+        ":SYSTEM:VERSION?",
+        ":SYSTEM:DATE?",
+        ":SYSTEM:TIME?",
+        ":CALIBRATION:STRING?",
+        ":CORRECTION:WAVELENGTH?",
+        ":CORRECTION:BEAMDIAMETER?",
+        "*STB?"
+    ]
+
+    print("Query commands:")
+    for command in commands:
+        response = usbtmc_query(usbtmc_interface, command)
+        print(f"  {command!r} -> {response!r}")
 
 
 def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
@@ -81,7 +69,7 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
         test_identification(usbtmc_interface)
 
-        test_screendump(usbtmc_interface)
+        check_status(usbtmc_interface)
 
     print()
     print("All done.")
@@ -89,7 +77,7 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
 def main():
     """Select device and run tests."""
-    (vid, pid) = (0x6656, 0x0834)
+    (vid, pid) = (0x1313, 0x8078)
     run_tests(vid, pid)
 
 
