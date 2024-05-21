@@ -2,8 +2,6 @@
 
 """This is a conformance testing tool for devices that claim to support USBTMC."""
 
-import os
-import sys
 import re
 import argparse
 from contextlib import closing
@@ -12,6 +10,7 @@ from enum import Enum
 from usbtmc import UsbTmcInterface
 from usbtmc.libusb_library import LibUsbLibraryFunctionCallError
 from usbtmc.usbtmc_interface_behavior import UsbTmcInterfaceBehavior
+from usbtmc.utilities import initialize_libusb_library_path_environment_variable
 
 languages = {
     0x1404: "Chinese (Macau SAR)",
@@ -133,25 +132,6 @@ languages = {
 }
 
 
-def initialize_libusb_library_path_environment_variable() -> bool:
-    """Initialize the LIBUSB_LIBRARY_PATH environment variable, if needed.
-
-    In Windows, we need to tell usbtmc where the libusb-1.0 DLL can be found. This is done by
-    pointing the LIBUSB_LIBRARY_PATH environment variable to the libusb-1.0 DLL.
-
-    If the LIBUSB_LIBRARY_PATH variable is already set, or on non-Windows platforms, this function is a no-op.
-    """
-
-    if ("LIBUSB_LIBRARY_PATH" in os.environ) or (sys.platform != "win32"):
-        return False
-
-    filename = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../windows/libusb-1.0.dll"))
-    if not os.path.exists(filename):
-        raise RuntimeError(f"Cannot find the libusb-1.0 library at '{filename}'. Please make sure it's available.")
-    os.environ["LIBUSB_LIBRARY_PATH"] = filename
-    return True
-
-
 def conformance_test_indicator_pulse(usbtmc_interface: UsbTmcInterface, is_capability: bool) -> None:
 
     print()
@@ -238,7 +218,7 @@ def yesno(flag: bool) -> str:
 
 def test_device(vid: int, pid: int) -> None:
 
-    #behavior = None
+    # behavior = None
     behavior = UsbTmcInterfaceBehavior(
         open_reset_method=0
     )
@@ -364,7 +344,7 @@ def main():
 
         test_device(vid, pid)
 
-        break  # TODO: Remove. With this break present, we only test the first device.
+        break  # TODO: Remove. With this break present, we only test the first device specified on the command line.
 
 
 if __name__ == "__main__":
