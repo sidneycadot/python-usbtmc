@@ -7,27 +7,26 @@ import time
 from typing import Optional
 
 from usbtmc import UsbTmcInterface
-from usbtmc.utilities import usbtmc_query, parse_definite_length_binary_block
+from usbtmc.utilities import usbtmc_query, parse_definite_length_binary_block, initialize_libusb_library_path_environment_variable
 
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
-    print("** Test identification request (Bulk: *IDN?).")
-    print("   Sending request ...")
     response = usbtmc_query(usbtmc_interface, "*IDN?")
-    print(f"   Received response: {response}")
+    print(f"The device identifies itself as: {response!r}.")
+    print()
 
 
 def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
-    for i in range(10):
-        for image_format in ["PNG", "BMP", "JPG"]:
-            usbtmc_interface.write_message(f"DISPLAY:DATA? {image_format}")
-            t1 = time.monotonic()
-            response = usbtmc_interface.read_binary_message()
-            t2 = time.monotonic()
-            image_data = parse_definite_length_binary_block(response)
-            print(f"{image_format}: {len(image_data)} bytes in {t2 -  t1:.3f} seconds.")
-            #with open("screendump.bmp", "wb") as fo:
-            #    fo.write(image_data)
+    for image_format in ["PNG", "BMP", "JPG"]:
+        usbtmc_interface.write_message(f"DISPLAY:DATA? {image_format}")
+        t1 = time.monotonic()
+        response = usbtmc_interface.read_binary_message()
+        t2 = time.monotonic()
+        image_data = parse_definite_length_binary_block(response)
+        print(f"{image_format}: {len(image_data)} bytes in {t2 -  t1:.3f} seconds.")
+
+        with open(f"screendump.{image_format.lower()}", "wb") as fo:
+            fo.write(image_data)
 
 
 def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
