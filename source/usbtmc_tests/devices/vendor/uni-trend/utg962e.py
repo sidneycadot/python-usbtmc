@@ -8,7 +8,7 @@ import struct
 from typing import Optional
 
 from usbtmc import UsbTmcInterface
-from usbtmc_tests.devices.utilities import initialize_libusb_library_path_environment_variable, usbtmc_query
+from usbtmc.utilities import initialize_libusb_library_path_environment_variable, usbtmc_query
 
 
 def fix_screenshot_data(image_data: bytes) -> bytes:
@@ -45,13 +45,16 @@ def fix_screenshot_data(image_data: bytes) -> bytes:
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
     response = usbtmc_query(usbtmc_interface, "*IDN?")
-    print(f"Device identifies as follows: {response}")
+    print(f"The device identifies itself as: {response!r}.")
+    print()
 
 
 def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
-    """The screendump is returned as a message, and is a bastardized BMP format."""
+    """test screendump functionality.
 
-    usbtmc_interface.write_message(f"DISPLAY:DATA?")
+    The screendump is returned as a message, and is a bastardized BMP format."""
+
+    usbtmc_interface.write_message("DISPLAY:DATA?")
     t1 = time.monotonic()
     image_data = usbtmc_interface.read_binary_message()
     t2 = time.monotonic()
