@@ -536,8 +536,14 @@ class UsbTmcInterface:
             if (btag_in ^ btag_in_inv) != 0xff:
                 raise UsbTmcGenericError("Bulk-in transfer: bad btag/btag_inv pair.")
 
-            if payload_size != len(transfer) - BULK_TRANSFER_HEADER_SIZE:
-                raise UsbTmcGenericError("Bulk-in transfer: bad payload size.")
+            if self._behavior.bad_bulk_in_transfer_size:
+                # QUIRK:
+                # Header + payload sizes should add up to the transfer length, but some devices mess this up.
+                pass
+            else:
+                # Normal behavior, compliant with the specification.
+                if payload_size != len(transfer) - BULK_TRANSFER_HEADER_SIZE:
+                    raise UsbTmcGenericError("Bulk-in transfer: bad payload size.")
 
             if payload_size == 0:
                 # The USBTMC standard forbids this.
