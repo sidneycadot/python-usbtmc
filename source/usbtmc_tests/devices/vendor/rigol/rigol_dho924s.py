@@ -7,11 +7,7 @@ import time
 from typing import Optional
 
 from usbtmc import UsbTmcInterface
-
-
-def usbtmc_query(usbtmc_interface: UsbTmcInterface, command: str) -> str:
-    usbtmc_interface.write_message(command)
-    return usbtmc_interface.read_message()
+from usbtmc.utilities import usbtmc_query, parse_definite_length_binary_block
 
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
