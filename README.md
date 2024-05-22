@@ -1,17 +1,18 @@
 python-usbtmc
 ==============
 
-This is python-usbtmc, a user-space driver implemented in Python that uses the user-space USB library
-libusb to communicate with USBTMC-capable devices. It works in Linux, MacOS, and Windows.
+This is python-usbtmc, a user-space Python module that uses *libusb* to communicate with
+USBTMC-capable devices. It works in Linux, MacOS, and Windows.
 
-It aims to be the natural successor to the USBTMC support implemented in the Python-IVI project,
-as found here:
+It aims to be an improvement relative to the older USBTMC support implemented as part of
+the Python-IVI project, as found here:
 
     https://github.com/python-ivi/python-usbtmc
 
-The Python module presented there has several shortcomings, the most important one being that
-it seems to be no longer actively maintained -- meaning the technical shortcomings will,
-unfortunately, never be fixed.
+This older module has several shortcomings, the most important one being that it seems
+to be no longer actively maintained. Other than that, it has been very useful to us,
+both in the lab (with a few patches here and there), and as a reference while developing
+our own usbtmc driver.
 
 What is USBTMC?
 ---------------
@@ -41,6 +42,8 @@ Depends on the libusb-1.0 library to perform control- and bulk USB transfers as 
 
 Getting it to work in Microsoft Windows
 ---------------------------------------
+
+In Windows things are more complicated than they could be.
 
 * Libusb dependency
 * WinUSB
