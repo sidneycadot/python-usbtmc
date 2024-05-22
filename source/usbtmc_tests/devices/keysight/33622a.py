@@ -72,7 +72,6 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
         test_waveform_upload(usbtmc_interface)
 
-    print()
     print("All done.")
 
 

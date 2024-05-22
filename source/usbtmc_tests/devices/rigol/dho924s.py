@@ -24,9 +24,9 @@ def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
         t2 = time.monotonic()
         image_data = parse_definite_length_binary_block(response)
         print(f"{image_format}: {len(image_data)} bytes in {t2 - t1:.3f} seconds.")
-
         with open(f"dho924s_screendump.{image_format.lower()}", "wb") as fo:
             fo.write(image_data)
+        print()
 
 
 def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
@@ -49,7 +49,6 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
         test_screendump(usbtmc_interface)
 
-    print()
     print("All done.")
 
 

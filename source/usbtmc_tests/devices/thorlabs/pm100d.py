@@ -32,6 +32,7 @@ def check_status(usbtmc_interface: UsbTmcInterface) -> None:
     for command in commands:
         response = usbtmc_query(usbtmc_interface, command)
         print(f"  {command!r} -> {response!r}")
+    print()
 
 
 def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
@@ -54,7 +55,6 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
         check_status(usbtmc_interface)
 
-    print()
     print("All done.")
 
 

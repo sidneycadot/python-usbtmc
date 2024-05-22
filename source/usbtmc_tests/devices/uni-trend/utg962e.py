@@ -53,17 +53,15 @@ def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
     """test screendump functionality.
 
     The screendump is returned as a message, and is a bastardized BMP format."""
-
     usbtmc_interface.write_message("DISPLAY:DATA?")
     t1 = time.monotonic()
     image_data = usbtmc_interface.read_binary_message()
     t2 = time.monotonic()
     print(f"Retrieved {len(image_data)} image data bytes in {t2 - t1:.3f} seconds.")
-
     image_data = fix_screenshot_data(image_data)
-
     with open("utg962e_screendump.bmp", "wb") as fo:
         fo.write(image_data)
+    print()
 
 
 def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
@@ -86,7 +84,6 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
         test_screendump(usbtmc_interface)
 
-    print()
     print("All done.")
 
 

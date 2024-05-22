@@ -33,7 +33,6 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
         test_identification(usbtmc_interface)
 
-    print()
     print("All done.")
 
 
