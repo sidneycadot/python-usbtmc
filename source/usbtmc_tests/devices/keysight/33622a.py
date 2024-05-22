@@ -7,7 +7,8 @@ import time
 from typing import Optional
 
 from usbtmc import UsbTmcInterface
-from usbtmc.utilities import (usbtmc_query, parse_definite_length_binary_block, initialize_libusb_library_path_environment_variable,
+from usbtmc.utilities import (usbtmc_query, parse_definite_length_binary_block,
+                              initialize_libusb_library_path_environment_variable,
                               make_definite_length_binary_block)
 
 
