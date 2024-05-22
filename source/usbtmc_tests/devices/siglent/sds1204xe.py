@@ -60,9 +60,7 @@ def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
     t2 = time.monotonic()
     print(f"Retrieved {len(image_data)} image data bytes in {t2 - t1:.3f} seconds.")
 
-    # image_data = fix_screenshot_data(image_data)
-
-    with open("screendump.bmp", "wb") as fo:
+    with open("sds1204xe_screendump.bmp", "wb") as fo:
         fo.write(image_data)
 
 

@@ -62,7 +62,7 @@ def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
 
     image_data = fix_screenshot_data(image_data)
 
-    with open("screendump.bmp", "wb") as fo:
+    with open("utg962e_screendump.bmp", "wb") as fo:
         fo.write(image_data)
 
 
