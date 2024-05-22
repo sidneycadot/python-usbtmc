@@ -2,14 +2,11 @@
 
 """Communicate with the Keysight 53230A frequency counter."""
 
-import contextlib
 import time
 from typing import Optional
 
 from usbtmc import UsbTmcInterface
-from usbtmc.utilities import (usbtmc_query, parse_definite_length_binary_block,
-                              initialize_libusb_library_path_environment_variable,
-                              make_definite_length_binary_block)
+from usbtmc.utilities import usbtmc_query, parse_definite_length_binary_block, initialize_libusb_library_path_environment_variable
 
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
@@ -42,9 +39,7 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
     initialize_libusb_library_path_environment_variable()
 
     # We override the min_bulk_speed to be able to request PNG screenshots, which is VERY slow.
-    usbtmc_interface = UsbTmcInterface(vid=vid, pid=pid, serial=serial, min_bulk_speed=5.0)
-    usbtmc_interface.open()
-    with contextlib.closing(usbtmc_interface):
+    with UsbTmcInterface(vid=vid, pid=pid, serial=serial, min_bulk_speed=5.0) as usbtmc_interface:
 
         device_info = usbtmc_interface.get_device_info()
         device_model = device_info.manufacturer + " " + device_info.product

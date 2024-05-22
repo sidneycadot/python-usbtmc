@@ -1,8 +1,7 @@
 #! /usr/bin/env -S python3 -B
 
-"""Communicate with the Uni-Trend URG962E function / arbitrary waveform generator."""
+"""Communicate with the Uni-Trend UTG962E function / arbitrary waveform generator."""
 
-import contextlib
 import time
 import struct
 from typing import Optional
@@ -11,20 +10,23 @@ from usbtmc import UsbTmcInterface
 from usbtmc.utilities import initialize_libusb_library_path_environment_variable, usbtmc_query
 
 
-def fix_screenshot_data(image_data: bytes) -> bytes:
-    """Fix screenshot image as returned by the DISPLAY:DATA? command."""
+def fix_screendump_data(image_data: bytes) -> bytes:
+    """Fix the screenshot image as returned by the DISPLAY:DATA? command."""
 
+    # The return message is 1 garbage byte, followed by a (faulty) BMP header of 14 bytes,
+    # a DIB header of 40 bytes, and pixel RGB data for the 480x272 image.
     expected_image_data_size = 1 + 14 + 40 + 272 * 480 * 3
 
     if len(image_data) != expected_image_data_size:
         raise ValueError("Bad image data.")
 
-    # Turn data into a bytearray, discarding the first stray byte, the value of which is non-deterministic.
+    # Turn data into a byte array, discarding the first stray byte, the value of which is non-deterministic.
     image_data = bytearray(image_data[1:])
 
-    # An (almost) BMP format image remains. Fix it.
+    # A faulty BMP format image remains. Fix it.
 
-    # Fix file length (the BMP header is not included in the value of the length field, so its value is too low by 14 bytes).
+    # Fix the file length field in the BMP header.
+    # The BMP header is not included in the value of the file length field, so its value is too low by 14 bytes.
     struct.pack_into("<L", image_data, 2, len(image_data))
 
     # Mirror image horizontally and rearrange pixel color ordering: (B/R/G) -> (B/G/R).
@@ -52,13 +54,13 @@ def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
 def test_screendump(usbtmc_interface: UsbTmcInterface) -> None:
     """test screendump functionality.
 
-    The screendump is returned as a message, and is a bastardized BMP format."""
+    The screendump is returned as a message, and is a bastardized BMP format that we correct."""
     usbtmc_interface.write_message("DISPLAY:DATA?")
     t1 = time.monotonic()
     image_data = usbtmc_interface.read_binary_message()
     t2 = time.monotonic()
     print(f"Retrieved {len(image_data)} image data bytes in {t2 - t1:.3f} seconds.")
-    image_data = fix_screenshot_data(image_data)
+    image_data = fix_screendump_data(image_data)
     with open("utg962e_screendump.bmp", "wb") as fo:
         fo.write(image_data)
     print()
@@ -69,9 +71,7 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
     initialize_libusb_library_path_environment_variable()
 
-    usbtmc_interface = UsbTmcInterface(vid=vid, pid=pid, serial=serial)
-    usbtmc_interface.open()
-    with contextlib.closing(usbtmc_interface):
+    with UsbTmcInterface(vid=vid, pid=pid, serial=serial) as usbtmc_interface:
 
         device_info = usbtmc_interface.get_device_info()
         device_model = device_info.manufacturer + " " + device_info.product

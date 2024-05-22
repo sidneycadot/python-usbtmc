@@ -2,7 +2,6 @@
 
 """Communicate with the Siglent SDS1204X-E oscilloscope."""
 
-import contextlib
 import time
 from typing import Optional
 
@@ -36,9 +35,7 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
     initialize_libusb_library_path_environment_variable()
 
-    usbtmc_interface = UsbTmcInterface(vid=vid, pid=pid, serial=serial)
-    usbtmc_interface.open()
-    with contextlib.closing(usbtmc_interface):
+    with  UsbTmcInterface(vid=vid, pid=pid, serial=serial) as usbtmc_interface:
 
         device_info = usbtmc_interface.get_device_info()
         device_model = device_info.manufacturer + " " + device_info.product

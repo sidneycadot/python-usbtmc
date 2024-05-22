@@ -4,7 +4,6 @@
 
 import re
 import argparse
-from contextlib import closing
 from enum import Enum
 
 from usbtmc import UsbTmcInterface
@@ -206,7 +205,7 @@ def conformance_test_scpi(usbtmc_interface: UsbTmcInterface) -> None:
     print("=====================")
     print()
 
-    usbtmc_interface.write_message("*IDN?\n")
+    usbtmc_interface.write_message("*IDN?")
     response = usbtmc_interface.read_message()
 
     print(f"Response: {response!r}")
@@ -223,9 +222,7 @@ def test_device(vid: int, pid: int) -> None:
         open_reset_method=0
     )
 
-    usbtmc_interface = UsbTmcInterface(vid=vid, pid=pid, behavior=behavior)
-    usbtmc_interface.open()
-    with closing(usbtmc_interface):
+    with  UsbTmcInterface(vid=vid, pid=pid, behavior=behavior) as usbtmc_interface:
 
         print()
         print(f"Device info for USBTMC device {vid:04x}:{pid:04x}")
@@ -344,7 +341,8 @@ def main():
 
         test_device(vid, pid)
 
-        break  # TODO: Remove. With this break present, we only test the first device specified on the command line.
+        # With this break present, we only test the first device specified on the command line.
+        break
 
 
 if __name__ == "__main__":

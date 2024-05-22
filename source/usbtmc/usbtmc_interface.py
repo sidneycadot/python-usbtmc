@@ -257,6 +257,13 @@ class UsbTmcInterface:
         self._bulk_out_btag: Optional[int] = None
         self._rsb_btag: Optional[int] = None
 
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, _exception_type, _exception_value, _exception_traceback):
+        self.close()
+
     def open(self) -> None:
         """Find and open the device.
 
