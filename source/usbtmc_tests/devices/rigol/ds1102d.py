@@ -9,6 +9,7 @@ from usbtmc.utilities import usbtmc_query, initialize_libusb_library_path_enviro
 
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
+    """Test device identification."""
     response = usbtmc_query(usbtmc_interface, "*IDN?")
     print(f"The device identifies itself as: {response!r}.")
     print()

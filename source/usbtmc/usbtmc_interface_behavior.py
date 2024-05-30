@@ -1,13 +1,10 @@
 """USBTMC interface device behaviors for a menagerie of different devices.
 
-This module defines device behaviors for a different devices, as well as a generic behavior that a compliant
-USBTMC device should be able to handle.
-
 It is an unfortunate fact of life that many (perhaps most) devices that implement USBTMC support do not fully
-follow the USB standard.
+follow the USBTMC standard.
 
-In this module we make accommodations for that fact by listing quirks for devices that we have come across. Ou
-host-side implementation of USBTMC can use the behaviors and quirks to adapt its behavior.
+This module defines device behaviors for different devices, as well as a default behavior that corresponds
+to a fully compliant USBTMC device.
 """
 
 from typing import NamedTuple
@@ -28,7 +25,11 @@ class UsbTmcInterfaceBehavior(NamedTuple):
 
 
 def get_usbtmc_interface_behavior(vid: int, pid: int) -> UsbTmcInterfaceBehavior:
-    """Map a (Vendor ID, Product ID) tuple to a UsbTmcInterfaceBehavior instance."""
+    """Generate a UsbTmcInterfaceBehavior instance from a (Vendor ID, Product ID) tuple.
+
+    Unknown devices will return the UsbTmcInterfaceBehavior corresponding to a fully compliant
+    USBTMC device, which is probably optimistic.
+    """
     match (vid, pid):
         case (0x1313, 0x8078):  # Thorlabs PM100D powermeter.
             return UsbTmcInterfaceBehavior(

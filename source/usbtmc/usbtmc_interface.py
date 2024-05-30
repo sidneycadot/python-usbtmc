@@ -58,10 +58,10 @@ class BulkMessageID(BetterIntEnum):
 
 class UsbDeviceInfo(NamedTuple):
     """USB device info as human-readable strings."""
-    vid_pid: str                  # vid:pid in xxxx:yyyy format, with xxxx and yyyy four-digit hexadecimal values.
-    manufacturer: str             # Manufacturer name as read from the device descriptor.
-    product: str                  # Product name as read from the device descriptor.
-    serial_number: Optional[str]  # Serial number string as read from the device descriptor. May be absent.
+    vid_pid: str                  # vid:pid in xxxx:yyyy format, with xxxx and yyyy being four-digit hexadecimal values.
+    manufacturer: str             # Manufacturer name, as read from the device descriptor.
+    product: str                  # Product name, as read from the device descriptor.
+    serial_number: Optional[str]  # Serial number, as read from the device descriptor. May be absent.
 
 
 class UsbTmcInterfaceInfo(NamedTuple):
@@ -117,9 +117,9 @@ class UsbTmcControlResponseError(UsbTmcError):
 
 
 class LibUsbLibraryManager:
-    """This class manages a LibUsbLibrary instance and a LibUsbContextPtr.
+    """This class manages a LibUsbLibrary instance and a LibUsbContextPtr obtained from it.
 
-    It is used by all UsbTmcInterface instances to gain access to libusb functionality.
+    An instance is shared by all UsbTmcInterface instances to gain access to libusb functionality.
     """
     def __init__(self):
         self._libusb = None
@@ -222,7 +222,7 @@ def _find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHan
 
 
 def _from_bcd(octet: int) -> int:
-    # Interpret an octet as a BCD number.
+    # Interpret an octet as a BCD number (range 0.. 99).
     hi = octet // 16
     lo = octet % 16
     ok = (0 <= hi <= 9) and (0 <= lo <= 9)

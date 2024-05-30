@@ -1,3 +1,4 @@
+"""USBTMC utility functions."""
 
 from io import BytesIO
 import os

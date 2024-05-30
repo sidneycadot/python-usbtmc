@@ -9,6 +9,7 @@ from usbtmc.utilities import initialize_libusb_library_path_environment_variable
 
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
+    """Test device identification."""
     response = usbtmc_query(usbtmc_interface, "*IDN?")
     print(f"The device identifies itself as: {response!r}.")
     print()
@@ -39,7 +40,7 @@ def run_tests(vid: int, pid: int, serial: Optional[str] = None) -> None:
 
     initialize_libusb_library_path_environment_variable()
 
-    with  UsbTmcInterface(vid=vid, pid=pid, serial=serial) as usbtmc_interface:
+    with UsbTmcInterface(vid=vid, pid=pid, serial=serial) as usbtmc_interface:
 
         device_info = usbtmc_interface.get_device_info()
         device_model = device_info.manufacturer + " " + device_info.product

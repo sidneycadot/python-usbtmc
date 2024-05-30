@@ -10,6 +10,7 @@ from usbtmc.utilities import usbtmc_query, parse_definite_length_binary_block, i
 
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
+    """Test device identification."""
     response = usbtmc_query(usbtmc_interface, "*IDN?")
     print(f"The device identifies itself as: {response!r}.")
     print()

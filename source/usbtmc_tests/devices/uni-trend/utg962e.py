@@ -46,6 +46,7 @@ def fix_screendump_data(image_data: bytes) -> bytes:
 
 
 def test_identification(usbtmc_interface: UsbTmcInterface) -> None:
+    """Test device identification."""
     response = usbtmc_query(usbtmc_interface, "*IDN?")
     print(f"The device identifies itself as: {response!r}.")
     print()
