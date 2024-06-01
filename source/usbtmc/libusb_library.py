@@ -375,16 +375,16 @@ class LibUsbLibrary:
         )
 
         if len(response) < 2:
-            raise LibUsbLibraryMiscellaneousError("Response too short.")
+            raise LibUsbLibraryMiscellaneousError("String descriptor language list response too short.")
 
         if response[0] != len(response):
-            raise LibUsbLibraryMiscellaneousError("Bad response length.")
+            raise LibUsbLibraryMiscellaneousError("Bad string descriptor language list response length.")
 
         if response[1] != LIBUSB_DT_STRING:
-            raise LibUsbLibraryMiscellaneousError("Bad descriptor type.")
+            raise LibUsbLibraryMiscellaneousError("Bad string descriptor language list descriptor type.")
 
         if len(response) % 2 != 0:
-            raise LibUsbLibraryMiscellaneousError("Response length not even.")
+            raise LibUsbLibraryMiscellaneousError("String descriptor language list response length not even.")
 
         num_languages = (len(response) - 2) // 2
 
@@ -482,7 +482,7 @@ class LibUsbLibrary:
         return bool(result)
 
     def detach_kernel_driver(self, device_handle: LibUsbDeviceHandlePtr, interface_number: int) -> None:
-        """CDetach a kernel driver from an interface."""
+        """Detach a kernel driver from an interface."""
         result = self._lib.libusb_detach_kernel_driver(device_handle, interface_number)
         if result != LIBUSB_SUCCESS:
             raise self._libusb_exception(result)
@@ -512,24 +512,24 @@ class LibUsbLibrary:
         (3) Either the `serial` parameter is None, or, it precisely matches the serial number as
             read from the device.
 
-        The enumeration and selection process is rather elaborate and does not reflect a basic operation provided
-        by the libusb library.
+        The enumeration and selection process is rather elaborate and does not reflect a basic operation
+        provided by the libusb library.
 
         The reason we still implement it as a method of the LibUsbLibrary class is because of the way libusb
         organizes the management of a device list. It is initialized as an array of devices and represented by
         a pointer to its first element. When done with the list, a client must free the device list by passing
         that pointer back to libusb.
 
-        This way of memory management means that there is no clean way to represent a device list in Python,
-        since simply copying the devices to a list would lose the pointer that we need to discard the device
-        list using libusb.
+        This way of managing the device list unfortunately means that there is no clean and easy way to represent
+        a device list in Python, since simply copying the devices to a list would lose the pointer that we need to
+        discard the device list using libusb.
 
         One way to deal with this would be to discard the device list and to rely on the reference counting
         memory management in the libusb-level devices. However, getting this to work correctly and reliably
         with the garbage collection at the Python level is quite complex.
 
-        For this reason, we opted to combine the device enumeration and device opening functionality in this
-        single function. It's not super elegant, but it works reliably.
+        For this reason, we  combine the device enumeration and device opening functionality in this single
+        function. It's not a very elegant solution, but it works reliably.
         """
 
         device_list = ctypes.POINTER(LibUsbDevicePtr)()
@@ -550,21 +550,26 @@ class LibUsbLibrary:
             # print(f"Located device:  {device_descriptor.idVendor:04x}:{device_descriptor.idProduct:04x}")
 
             if (device_descriptor.idVendor != vid) or (device_descriptor.idProduct != pid):
-                # VID or PID mismatch -- reject.
+                # VID or PID mismatch; reject the device.
                 continue
 
             try:
                 device_handle = self.open(device)
             except LibUsbLibraryFunctionCallError:
-                # Cannot open the device -- reject.
+                # Cannot open the device; reject the device.
                 continue
 
+            # The device was opened successfully.
+            # If we reject the device further on for any reason, we must remember to close the device!
+
             if serial is None:
-                # No check on the serial number was requested. Accept the device.
+                # No check on the serial number was requested. Accept the (now open) device.
                 break
 
+            # Check the serial number.
+
             if device_descriptor.iSerialNumber == 0:
-                # A serial number check was requested, but the device doesn't have one. Close device, reject.
+                # A serial number check was requested, but the device doesn't have one. Close and reject the device.
                 self.close(device_handle)
                 device_handle = None
                 continue
@@ -572,16 +577,19 @@ class LibUsbLibrary:
             try:
                 serial_from_device = self.get_string_descriptor(device_handle, device_descriptor.iSerialNumber, timeout, langid)
             except LibUsbLibraryFunctionCallError:
-                # Error while retrieving the serial number. Close device, reject.
+                # Error while retrieving the serial number. Close and reject the device.
                 self.close(device_handle)
                 device_handle = None
                 continue
 
             if serial != serial_from_device:
-                # Serial number mismatch. Close device, reject.
+                # Serial number mismatch. Close and reject the device.
                 self.close(device_handle)
                 device_handle = None
                 continue
+
+            # The device serial number matches the serial number we're looking for; we're done.
+            break
 
         # Discard the list of devices and decrement their reference counts.
         # This will bring all reference counts to zero, except for the currently opened device (if any).
