@@ -560,7 +560,7 @@ class LibUsbLibrary:
                 continue
 
             # The device was opened successfully.
-            # If we reject the device further on for any reason, we must remember to close the device!
+            # If we reject the device further on for any reason, we must remember to close it.
 
             if serial is None:
                 # No check on the serial number was requested. Accept the (now open) device.

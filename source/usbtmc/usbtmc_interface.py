@@ -7,7 +7,7 @@ import ctypes.util
 
 from .better_int_enum import BetterIntEnum
 from .libusb_library import LibUsbLibrary, LibUsbDeviceHandlePtr, LANGID_ENGLISH_US
-from .usbtmc_interface_behavior import get_usbtmc_interface_behavior, UsbTmcInterfaceBehavior
+from .usbtmc_interface_behavior import get_usbtmc_interface_behavior, UsbTmcInterfaceBehavior, ResetAtOpenPolicyFlag
 
 BULK_TRANSFER_HEADER_SIZE = 12  # All Bulk-In and Bulk-Out transfers have a 12-byte header describing the transfer.
 
@@ -66,6 +66,7 @@ class UsbDeviceInfo(NamedTuple):
 
 class UsbTmcInterfaceInfo(NamedTuple):
     """USBTMC interface info."""
+    configuration_number: int
     interface_number: int
     interface_protocol: int  # 0: USBTMC, 1: USB488.
     bulk_in_endpoint: int
@@ -210,6 +211,7 @@ def _find_usbtmc_interface(libusb: LibUsbLibrary, device_handle: LibUsbDeviceHan
                         continue
 
                     return UsbTmcInterfaceInfo(
+                        config_descriptor.contents.bConfigurationValue,
                         altsetting.bInterfaceNumber,
                         altsetting.bInterfaceProtocol,
                         bulk_in_endpoint, bulk_in_endpoint_max_packet_size,
@@ -286,7 +288,11 @@ class UsbTmcInterface:
             libusb.close(device_handle)
             raise UsbTmcGenericError("The device doesn't have a USBTMC interface.")
 
-        assert usbtmc_info is not None
+        # Let libusb take care of attaching/detaching the kernel driver.
+        libusb.set_auto_detach_kernel_driver(device_handle, True)
+
+        #if libusb.kernel_driver_active(device_handle, usbtmc_info.interface_number):
+        #    libusb.detach_kernel_driver(device_handle, usbtmc_info.interface_number)
 
         # Declare the device open, but prepare to close it when a subsequent initialization operation fails.
 
@@ -297,15 +303,19 @@ class UsbTmcInterface:
         self._rsb_btag = 1  # Will be incremented to 2 at first invocation of _get_next_rsb_btag.
 
         try:
-            # Claim the interface.
+            # We reset the interface using the method specified by the device behavior's reset-at-open policy.
+
+            if ResetAtOpenPolicyFlag.SET_CONFIGURATION in self._behavior.reset_at_open_policy:
+                libusb.set_configuration(device_handle, usbtmc_info.configuration_number)
+
+            # Claim the interface. This needs to happen *after* the set-configuration operation.
             self._claim_interface()
 
-            # (QUIRK) - Some devices don't handle the standard 'clear USBTMC interface' sequence correctly.
-            match self._behavior.open_reset_method:
-                case 0:
-                    pass  # no-op
-                case 1:
-                    self.clear_usbtmc_interface()
+            if ResetAtOpenPolicyFlag.CLEAR_INTERFACE in self._behavior.reset_at_open_policy:
+                self.clear_usbtmc_interface()
+
+            if ResetAtOpenPolicyFlag.GOTO_REMOTE in self._behavior.reset_at_open_policy:
+                self.remote_enable_control(True)
 
         except Exception:
             # If any exception happened during the first uses of the newly opened device,
@@ -664,12 +674,14 @@ class UsbTmcInterface:
                 break
 
             if response[0] == ControlStatus.USBTMC_PENDING:
-                if (response[1] & 0x01) != 0:
+                if (not self._behavior.clear_usbtmc_interface_short_packet_read_request_disabled) and (response[1] & 0x01) != 0:
                     # If bmClear.D0 = 1, the Host should read from the Bulk-IN endpoint until a short
                     # packet is received. The Host must send CHECK_CLEAR_STATUS at a later time.
                     max_dummy_size = self._usbtmc_info.bulk_in_endpoint_max_packet_size
+                    print("doing dummy transfer ...")
                     while True:
                         dummy_transfer = self._bulk_transfer_in(max_dummy_size)
+                        print("dummy transfer completed:", len(dummy_transfer))
                         if len(dummy_transfer) < self._usbtmc_info.bulk_in_endpoint_max_packet_size:
                             break
 
@@ -679,7 +691,7 @@ class UsbTmcInterface:
         self._libusb.clear_halt(self._device_handle, self._usbtmc_info.bulk_out_endpoint)
 
         # (QUIRK) Clear the bulk-in endpoint if the device requires it.
-        if self._behavior.usbtmc_clear_sequence_resets_bulk_in:
+        if self._behavior.clear_usbtmc_interface_resets_bulk_in:
             # This is NOT prescribed by the standard.
             self._libusb.clear_halt(self._device_handle, self._usbtmc_info.bulk_in_endpoint)
 
